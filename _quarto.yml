@@ -22,7 +22,7 @@ website:
   twitter-card:
     creator: "@jacoobaloo"
   open-graph: true
-  cookie-consent: true
+  cookie-consent: false  # don't have any tracking cookies
   search: true
   navbar:
     left:
