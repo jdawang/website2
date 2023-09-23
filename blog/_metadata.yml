@@ -1,0 +1,26 @@
+# Freeze computed outputs
+freeze: auto
+
+
+# Enable banner style title blocks
+title-block-banner: true
+
+
+# Default for table of contents
+toc: true
+toc-expand: true
+
+page-layout: article
+
+# Default knitr options
+execute:
+  echo: false
+  message: false
+  warning: false
+
+author:
+ - name: Jacob Dawang
+
+comments: 
+  giscus:
+    repo: jdawang/jdawang.github.io

@@ -1,0 +1,50 @@
+project:
+  type: website
+  resources:
+    - "files/"
+  render:
+    - "*.qmd"
+    - "blog/**/*.md"
+    - "blog/election-maps-2022/index.md"
+    - "!blog/election-maps-2022/index.qmd"
+
+
+execute:
+  freeze: auto
+
+website:
+  title: "Jacob Dawang"
+  image: files/profile.png
+  site-url: "https://jdawang.github.io"
+  repo-url: "https://github.com/jdawang/jdawang.github.io"
+  description: Jacob Dawang's personal website
+  favicon: files/favicon.ico
+  twitter-card:
+    creator: "@jacoobaloo"
+  open-graph: true
+  cookie-consent: true
+  search: true
+  navbar:
+    left:
+      - about/index.qmd
+      - blog.qmd
+      - projects/index.qmd
+    right: 
+      - icon: rss
+        href: blog.xml
+  page-footer:
+    center: |
+      {{< fa regular copyright >}} 2023 Jacob Dawang
+      {{< fa brands creative-commons >}} {{< fa brands creative-commons-by >}} {{< fa brands creative-commons-sa >}} {{< fa brands creative-commons-nc >}} [(CC BY-NC-SA 4.0)](http://creativecommons.org/licenses/by-nc-sa/4.0/)<br>
+      Powered by [Quarto](https://quarto.org/)<br>
+
+format:
+  html:
+    theme:
+      light: cosmo
+      dark: solar
+    css: styles.css
+    toc: false
+
+editor: visual
+

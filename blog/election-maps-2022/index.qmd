@@ -1,0 +1,686 @@
+---
+title: "2022 Toronto Municipal Election Maps - Councillors"
+date: "2022-10-31T15:00:14"
+categories:
+  - map
+  - data
+  - election
+images: ["/posts/2022/10/2022-toronto-municipal-election-maps-councillors/index.markdown_strict_files/figure-markdown_strict/ward-11-margin-cartogram.png"]
+toc: true
+---
+
+I decided to spend some time mapping out the poll-by-poll results for each of the council races. A lot of the races were not close so the maps just show a blowout. Since there were 25 wards, I set up [a dedicated website](https://jdawang.github.io/2022-election-maps/) for interactive maps of all wards. Here, I want to highlight a few interesting races with some static maps and [cartograms](https://en.wikipedia.org/wiki/Cartogram), where each area is weighted by the total number of votes, since land does not vote:
+
+-   Ward 3: Etobicoke-Lakeshore, where Amber Morley beat long-time incumbent Mark Grimes.
+
+-   Ward 4: Parkdale-High Park, where Gord Perks got a scare from new candidate Chemi Lhamo.
+
+-   Ward 5: York South-Weston, where Chiara Padovani came close to beating Frances Nunziata.
+
+-   Ward 11: University-Rosedale, where Dianne Saxe eked out a win over Norm Di Pasquale.
+
+-   Ward 18: Willowdale, where Markus O'Brien Fehr had amassed a solid volunteer team and endorsements, was ahead in the polls, but was beat handily by Lily Cheng.
+
+-   Ward 20: Scarborough-Southwest, where budget chief Gary Crawford came close to losing to Parthi Kandavel.
+
+-   Ward 23: Scarborough North, where incumbent Cynthia Lai died a few days before the election and Jamaal Myers, a progressive candidate won handily on election day.
+
+If you have any requests or found any mistakes, please feel free to contact me, but no promises as I just do this in my spare time!
+
+```{r libraries}
+library(tidyverse)
+library(sf)
+library(readxl)
+library(mapview)
+library(glue)
+mapviewOptions(fgb = TRUE)
+```
+
+```{r read data}
+read_ward_data <- function(path, sheet, .range) {
+  read_xlsx(
+    path, 
+    sheet=sheet, 
+    range=.range
+  ) %>%
+    rename(candidate = Subdivision) %>%
+    filter(!(candidate %in% c("Councillor", "Mayor"))) %>% 
+    pivot_longer(
+      cols=!candidate,
+      names_to="poll",
+      names_transform=as.numeric,
+      values_to="votes"
+    ) %>%
+    group_by(poll) %>%
+    mutate(total = sum(votes), pct = ifelse(total != 0, votes / total, 0)) %>%
+    ungroup()
+}
+
+add_ward_and_polls <- function(.data, long_code, short_code) {
+  mutate(
+    .data,
+    ward=as.numeric(str_sub({{long_code}}, 1, 2)),
+    poll=as.numeric({{short_code}}))
+}
+
+poll_locations = read_sf("data/Cot geospatial6 - Voting Location.geojson") %>%
+  rename_all(str_to_lower) %>%
+  add_ward_and_polls(point_long_code, point_short_code) %>%
+  select(ward, poll, point_name, voter_count)
+
+subdivision_locations <- read_sf("data/Cot geospatial6 - Voting Subdivision.geojson") %>%
+  rename_all(str_to_lower) %>%
+  add_ward_and_polls(area_long_code, area_short_code) %>%
+  select(ward, poll, voter_count)
+
+ranges <- str_c(
+  "A2:",
+  c(
+    "BD19",
+    "BU8",
+    "CI9",
+    "BS9",
+    "BN6",
+    "BB7",
+    "AV6",
+    "BM8",
+    "BC12",
+    "CQ15",
+    "BZ17",
+    "BM7",
+    "CM12",
+    "BA8",
+    "BD7",
+    "BK14",
+    "BJ9",
+    "BH7",
+    "BF10",
+    "BJ11",
+    "AY9",
+    "AY9",
+    "AM6",
+    "AZ7",
+    "AW6"
+  )
+)
+
+mayor_ranges <- str_replace(ranges, "^\\d+|\\d+$", "34")
+
+councillor_results <- map2(
+  1:25,
+  ranges, 
+  ~ read_ward_data(
+    "data/2022-results/2022_Toronto_Poll_By_Poll_Councillor.xlsx",
+    glue("Ward {.x}"),
+    .y
+  )
+)
+
+mayor_results <- map2(
+  1:25,
+  mayor_ranges, 
+  ~ read_ward_data(
+    "data/2022-results/2022_Toronto_Poll_By_Poll_Mayor.xlsx",
+    glue("Ward {.x}"),
+    .y
+  )
+)
+```
+
+```{r merge}
+merge_results_with_geometry <- function(results, geometry, ward_number) {
+  results %>%
+    left_join(
+      filter(geometry, ward == ward_number),
+      by="poll"
+    ) %>%
+    st_as_sf()
+}
+
+councillor_polls <- map2(
+  1:25,
+  councillor_results,
+  ~ merge_results_with_geometry(.y, poll_locations, .x)
+)
+councillor_subdivisions <- map2(
+  1:25,
+  councillor_results,
+  ~ merge_results_with_geometry(.y, subdivision_locations, .x)
+)
+mayor_polls <- map2(
+  1:25,
+  mayor_results,
+  ~ merge_results_with_geometry(.y, poll_locations, .x)
+)
+mayor_subdivisions <- map2(
+  1:25,
+  mayor_results,
+  ~ merge_results_with_geometry(.y, subdivision_locations, .x)
+)
+```
+
+```{r}
+popupTable2 <- function(...) {
+  pt_args <- list(...)
+  pop <- do.call(leafpop::popupTable, pt_args)
+  return(as.character(pop))
+}
+
+add_margin <- function(.data, winner, runner_up) {
+  winner_only <- .data %>% 
+  filter(candidate == winner) %>%
+  inner_join(
+    .data %>%
+      st_drop_geometry() %>%
+      filter(candidate==runner_up) %>%
+      rename(runner_up_pct = pct, runner_up_votes = votes) %>%
+      select(poll, runner_up_pct, runner_up_votes),
+    by="poll"
+  ) %>%
+  mutate(
+    vote_margin = votes - runner_up_votes,
+    vote_margin_pct = pct - runner_up_pct,
+    vote_margin_pct_round = round(vote_margin_pct, digits=2),
+    pct_round = round(pct, digits=2)
+  )
+}
+
+margin_ggplot <- function(
+    subdivision_data,
+    winner, 
+    runner_up, 
+    palette,
+    palette_direction=-1
+)  {
+  subdivision_margins <- add_margin(subdivision_data, winner, runner_up)
+  
+  winner_split <- str_split(winner, fixed(" "))[[1]]
+  winner_lname <- winner_split[-length(winner_split)]
+  
+  ggplot(subdivision_margins) +
+    geom_sf(aes(fill=vote_margin_pct)) +
+    scale_fill_distiller(
+      palette=palette,
+      direction=palette_direction,
+      limits=c(-0.5, 0.5),
+      labels=scales::label_percent(suffix=" pp"),
+      oob=scales::squish
+    ) +
+    theme_void() +
+    labs(fill=glue("{winner_lname} margin"))
+}
+
+popular_vote_ggplot <- function(
+    subdivision_data,
+    candidate_name,
+    palette
+)  {
+  subdivision_candidate_only <- filter(subdivision_data, candidate == candidate_name) %>%
+    mutate(pct_round=round(pct, digits=2))
+  
+  
+  candidate_split <- str_split(candidate_name, fixed(" "))[[1]]
+  candidate_lname <- candidate_split[-length(candidate_split)]
+  candidate_lname <- str_flatten(candidate_lname, collapse=" ")
+  
+
+  ggplot(subdivision_candidate_only) +
+    geom_sf(aes(fill=pct)) +
+    scale_fill_distiller(
+      palette=palette,
+      direction=1,
+      limits=quantile(subdivision_candidate_only$pct, c(0.1,0.9)),
+      labels=scales::percent,
+      oob=scales::squish
+    ) +
+    theme_void() +
+    labs(fill=glue("{candidate_lname} vote"))
+}
+```
+
+## Ward 3: Etobicoke-Lakeshore
+
+Ward 3 was one of the big stories of the night, with Amber Morley beating out Mark Grimes. Morley won big in New Toronto and generally to the south of the ward. Grimes' support was limited to the west and northeast. Humber Bay Shores was an exception as many of the buildings were close or even leaned towards Grimes.
+
+```{r ward-3-margin}
+margin_ggplot(
+  councillor_subdivisions[[3]], 
+  "Morley Amber",
+  "Grimes Mark",
+  "PRGn"
+) +
+  ggtitle("Ward 3: Etobicoke-Lakeshore margin of victory")
+```
+
+The cartogram gives a better picture of how Humber Bay Shores was close or leaned towards Grimes.
+
+```{r ward-3-margin-cartogram}
+prep_cartogram <- function(.data, fn=cartogram::cartogram_ncont) {
+  .data %>%
+    filter(poll < 97) %>%
+    st_transform(crs="EPSG:2030") %>%
+    fn("total")
+}
+
+margin_ggplot(
+  prep_cartogram(councillor_subdivisions[[3]]), 
+  "Morley Amber",
+  "Grimes Mark",
+  "PRGn"
+) +
+  ggtitle("Ward 3: Etobicoke-Lakeshore margin of victory")
+```
+
+## Ward 4: Parkdale-High Park
+
+Parkdale-High Park was a close three-way race between Gord Perks, Chemi Lhamo and Siri Agrell. There is a clear southeast/northwest divide in this ward, where Parkdale voted towards Lhamo, whereas High Park voted towards Perks.
+
+```{r ward-4-margin}
+margin_ggplot(
+  councillor_subdivisions[[4]], 
+  "Perks Gord",
+  "Lhamo Chemi",
+  "PRGn",
+  palette_direction=1
+) +
+  ggtitle("Ward 4: Parkdale-High Park margin of victory")
+```
+
+Cartogram reinforces how close it was.
+
+```{r ward-4-margin-cartogram}
+margin_ggplot(
+  prep_cartogram(councillor_subdivisions[[4]]), 
+  "Perks Gord",
+  "Lhamo Chemi",
+  "PRGn",
+  palette_direction=1
+) +
+  ggtitle("Ward 4: Parkdale-High Park margin of victory")
+```
+
+Because it was a three-way race, I also made popular vote maps for the three candidates.
+
+First, Gord Perks definitely did better in the north and west part of the ward and was weak in Parkdale, with strongholds just north of High Park.
+
+```{r ward-4-perks}
+popular_vote_ggplot(
+  councillor_subdivisions[[4]], 
+  "Perks Gord",
+  "Greens"
+)+
+  ggtitle("Ward 4: Parkdale-High Park, Gord Perks vote")
+```
+
+```{r ward-4-perks-cartogram}
+popular_vote_ggplot(
+  prep_cartogram(councillor_subdivisions[[4]]), 
+  "Perks Gord",
+  "Greens"
+)+
+  ggtitle("Ward 4: Parkdale-High Park, Gord Perks vote")
+```
+
+Chemi Lhamo did really well in dense Parkdale, but her vote share was very weak the further north and west you go.
+
+```{r ward-4-lhamo}
+popular_vote_ggplot(
+  councillor_subdivisions[[4]], 
+  "Lhamo Chemi",
+  "Purples"
+)+
+  ggtitle("Ward 4: Parkdale-High Park, Chemi Lhamo vote")
+```
+
+```{r ward-4-lhamo-cartogram}
+popular_vote_ggplot(
+  prep_cartogram(councillor_subdivisions[[4]]), 
+  "Lhamo Chemi",
+  "Purples"
+)+
+  ggtitle("Ward 4: Parkdale-High Park, Chemi Lhamo vote")
+```
+
+Siri Agrell was at her best in the very northwest of the ward, but it wasn't enough to make up for a weak performance overall, especially in Parkdale.
+
+```{r ward-4-agrell}
+popular_vote_ggplot(
+  councillor_subdivisions[[4]], 
+  "Agrell Siri",
+  "Blues"
+)+
+  ggtitle("Ward 4: Parkdale-High Park, Siri Agrell vote")
+```
+
+```{r ward-4-agrell-cartogram}
+popular_vote_ggplot(
+  prep_cartogram(councillor_subdivisions[[4]]), 
+  "Agrell Siri",
+  "Blues"
+)+
+  ggtitle("Ward 4: Parkdale-High Park, Siri Agrell vote")
+```
+
+## Ward 5: York South-Weston
+
+Chiara Padovani came close to beating Frances Nunziata. There is generally a trend where Nunziata did better in the northeast and Padovani did better in the south and west.
+
+```{r ward-5-margin}
+margin_ggplot(
+  councillor_subdivisions[[5]], 
+  "Nunziata Frances",
+  "Padovani Chiara",
+  "PRGn",
+  palette_direction=1
+) +
+  ggtitle("Ward 5: York South-Weston margin of victory")
+```
+
+Not sure the cartogram is useful in this case, but here it is anyway
+
+```{r ward-5-margin-cartogram}
+margin_ggplot(
+  prep_cartogram(councillor_subdivisions[[5]]), 
+  "Nunziata Frances",
+  "Padovani Chiara",
+  "PRGn",
+  palette_direction=1
+) +
+  ggtitle("Ward 5: York South-Weston margin of victory")
+```
+
+## Ward 11: University-Rosedale
+
+Ward 11 was thought to be a three-way race between Dianne Saxe, Norm Di Pasquale, and Robin Buxton Potts, but Buxton Potts ended up not being competitive. The clear divide here is between the west and south part of the riding leaning more towards Di Pasquale, and the north and east part of the riding, the East Annex to Rosedale, voting more towards Saxe.
+
+```{r ward-11-margin}
+margin_ggplot(
+  councillor_subdivisions[[11]], 
+  "Saxe Dianne",
+  "Di Pasquale Norm",
+  "PRGn",
+  palette_direction=1
+) +
+  ggtitle("Ward 11: University-Rosedale margin of victory")
+```
+
+Cartogram shows just how close it was when you downscale relatively low density Rosedale.
+
+```{r ward-11-margin-cartogram}
+margin_ggplot(
+  prep_cartogram(councillor_subdivisions[[11]]), 
+  "Saxe Dianne",
+  "Di Pasquale Norm",
+  "PRGn",
+  palette_direction=1
+) +
+  ggtitle("Ward 11: University-Rosedale margin of victory")
+```
+
+## Ward 18: Willowdale
+
+At least for me, Willowdale was an upset ward. Markus O'Brien Fehr seemed to be better organized, had the backing of the mayor and the MP, had a solid ground game, was ahead in the polls, and Daniel Lee seemed to be splitting the Lily Cheng vote. Lily Cheng emerged victorious anyways, and it seems she did not have too many weak spots. While Cheng performed really well east of Yonge, O'Brien Fehr only came out ahead in a few places west of Yonge.
+
+```{r ward-18-margin}
+margin_ggplot(
+  councillor_subdivisions[[18]], 
+  "Cheng Lily",
+  "O'Brien Fehr Markus",
+  "RdBu",
+  palette_direction=1
+) +
+  ggtitle("Ward 18: Willowdale margin of victory")
+```
+
+I don't think the cartograms are very insightful for this ward, so I'm just going to show one for the margin of victory.
+
+```{r ward-18-margin-cartogram}
+margin_ggplot(
+  prep_cartogram(councillor_subdivisions[[18]]), 
+  "Cheng Lily",
+  "O'Brien Fehr Markus",
+  "RdBu",
+  palette_direction=1
+) +
+  ggtitle("Ward 18: Willowdale margin of victory")
+```
+
+Since there was a strong third-place candidate, here are the popular vote maps for each.
+
+First, Lily Cheng.
+
+```{r ward-18-cheng}
+popular_vote_ggplot(
+  councillor_subdivisions[[18]], 
+  "Cheng Lily",
+  "Blues"
+) +
+  ggtitle("Ward 18: Willowdale, Lily Cheng vote")
+```
+
+Next, Markus O'Brien Fehr. He was strongest in the southwest.
+
+```{r ward-18-obrien-fehr}
+popular_vote_ggplot(
+  councillor_subdivisions[[18]], 
+  "O'Brien Fehr Markus",
+  "Reds"
+) +
+  ggtitle("Ward 18: Willowdale, O'Brien Fehr vote")
+```
+
+Daniel Lee did best in the north.
+
+```{r ward-18-lee}
+popular_vote_ggplot(
+  councillor_subdivisions[[18]], 
+  "Lee Daniel",
+  "Purples"
+) +
+  ggtitle("Ward 18: Willowdale, Daniel Lee vote")
+```
+
+## Ward 20: Scarborough-Southwest
+
+Ward 20 was a close race between budget chief Gary Crawford and Parthi Kandavel who chased after the NIMBY vote by taking an anti-development platform.
+
+Crawford did best in the north, especially north of the Lakeshore East tracks. Kandavel did best in the south, especially south of Kingston Road.
+
+```{r ward-20-margin}
+margin_ggplot(
+  councillor_subdivisions[[20]], 
+  "Crawford Gary",
+  "Kandavel Parthi",
+  "RdBu",
+  palette_direction=1
+)  +
+  ggtitle("Ward 20: Scarborough-Southwest margin of victory")
+```
+
+Cartogram show some Crawford holdouts in the south, probably some building-specific polls.
+
+```{r ward-20-margin-cartogram}
+margin_ggplot(
+  prep_cartogram(councillor_subdivisions[[20]]), 
+  "Crawford Gary",
+  "Kandavel Parthi",
+  "RdBu",
+  palette_direction=1
+)  +
+  ggtitle("Ward 20: Scarborough-Southwest margin of victory")
+```
+
+Kevin Rupasinghe who was endorsed by (almost?) all organizations who endorsed in this ward, did best from Kennedy to the western border of the ward.
+
+```{r ward-20-rupasinghe}
+popular_vote_ggplot(
+  councillor_subdivisions[[20]], 
+  "Rupasinghe Kevin",
+  "Purples"
+) +
+  ggtitle("Ward 20: Scarborough-Southwest Kevin Rupasinghe vote")
+```
+
+```{r ward-20-rupasinghe-cartogram}
+popular_vote_ggplot(
+  prep_cartogram(councillor_subdivisions[[20]]), 
+  "Rupasinghe Kevin",
+  "Purples"
+) +
+  ggtitle("Ward 20: Scarborough-Southwest Kevin Rupasinghe vote")
+```
+
+## Ward 23: Scarborough North
+
+This ward is a special case. Cynthia Lai died a few days before the election, but it was too late to remove her name from the ballot. Her votes did not count. Using the standard tabulation, with zero votes for Lai, Jamaal Myers comes out ahead almost everywhere throughout the ward, with a strong base in the southeast.
+
+```{r ward-23-margin}
+margin_ggplot(
+  councillor_subdivisions[[23]], 
+  "Myers Jamaal",
+  "Francis Phillip",
+  "PRGn",
+  palette_direction=-1
+) +
+  ggtitle("Ward 23: Scarborough North margin of victory")
+```
+
+The cartogram highlights three building-specific polls in the centre of the riding that Myers lost.
+
+```{r ward-23-margin-cartogram}
+margin_ggplot(
+  prep_cartogram(councillor_subdivisions[[23]]), 
+  "Myers Jamaal",
+  "Francis Phillip",
+  "PRGn",
+  palette_direction=-1
+) +
+  ggtitle("Ward 23: Scarborough North margin of victory")
+```
+
+We can try to back out who voted for Lai by calculating a proxy: total mayoral votes minus total councillor votes. Compared to Lai, Myers still did better throughout the ward as it seems most people changed their vote from her, knowing that it would not count.
+
+```{r ward-23-lai-proxy-margin}
+total_votes_per_poll <- function(.data) {
+  .data %>% 
+    st_drop_geometry() %>%
+    group_by(poll) %>%
+    summarise(total_votes=sum(votes, na.rm=TRUE), .groups="drop")
+}
+
+lai_proxy <- function(councillor_data, mayor_data) {
+  councillor_data %>%
+    total_votes_per_poll() %>%
+    left_join(
+      mayor_data %>%
+        total_votes_per_poll() %>%
+        rename(mayor_votes=total_votes) %>%
+        select(poll, mayor_votes),
+      by="poll"
+    ) %>%
+    mutate(
+      candidate="Lai Cynthia", 
+      votes=mayor_votes - total_votes,
+      ward=23
+    ) %>%
+    select(candidate, poll, votes, total=mayor_votes, ward, contains("point_name")) %>%
+    left_join(
+      councillor_data %>%
+        select(poll) %>%
+        group_by(poll) %>%
+        slice_head(n=1),
+      by="poll"
+    ) %>%
+    st_as_sf() %>%
+    bind_rows(councillor_data) %>%
+    group_by(poll) %>%
+    mutate(
+      total=max(coalesce(total, 0)), 
+      voter_count=max(coalesce(voter_count, 0))
+    ) %>%
+    ungroup() %>%
+    mutate(pct=ifelse(total != 0, votes / total, 0))
+}
+
+ward23_subdivisions_lai_proxy <- lai_proxy(councillor_subdivisions[[23]], mayor_subdivisions[[23]])
+
+margin_ggplot(
+  ward23_subdivisions_lai_proxy, 
+  "Myers Jamaal",
+  "Lai Cynthia",
+  "PRGn",
+  palette_direction=-1
+) +
+  labs(
+    title="Ward 23: Scarborough North margin of victory",
+    subtitle="With Lai vote proxy"
+  )
+```
+
+The cartogram again shows three building-specific polls that Myers loses versus Lai proxy votes.
+
+```{r ward-23-lai-proxy-margin-cartogram}
+margin_ggplot(
+  prep_cartogram(ward23_subdivisions_lai_proxy), 
+  "Myers Jamaal",
+  "Lai Cynthia",
+  "PRGn",
+  palette_direction=-1
+) +
+  labs(
+    title="Ward 23: Scarborough North margin of victory",
+    subtitle="With Lai vote proxy"
+  )
+```
+
+If we look at Lai's proxy popular vote, it's more or less distributed all over, but strongest in the north and west
+
+```{r ward-23-lai-proxy}
+popular_vote_ggplot(
+  ward23_subdivisions_lai_proxy, 
+  "Lai Cynthia",
+  "Greens"
+) +
+  labs(
+    title="Ward 23: Scarborough North Cynthia Lai proxy vote"
+)
+```
+
+Cartogram highlights some strength for Lai proxy votes in those three building-specific polls.
+
+```{r ward-23-lai-proxy-cartogram}
+popular_vote_ggplot(
+  prep_cartogram(ward23_subdivisions_lai_proxy), 
+  "Lai Cynthia",
+  "Greens"
+) +
+  labs(
+    title="Ward 23: Scarborough North Cynthia Lai proxy vote"
+)
+```
+
+Myers' vote, taking into account Lai proxy votes remains strongest in the southeast and weakest in the northwest.
+
+```{r ward-23-lai-proxy-myers}
+popular_vote_ggplot(
+  ward23_subdivisions_lai_proxy, 
+  "Myers Jamaal",
+  "Purples"
+) +
+  labs(
+    title="Ward 23: Scarborough North Jamaal Myers popular vote",
+    subtitle="With Lai proxy vote"
+  )
+```
+
+```{r ward-23-lai-proxy-myers-cartogram}
+popular_vote_ggplot(
+  prep_cartogram(ward23_subdivisions_lai_proxy), 
+  "Myers Jamaal",
+  "Purples"
+) +
+  labs(
+    title="Ward 23: Scarborough North Jamaal Myers popular vote",
+    subtitle="With Lai proxy vote"
+  )
+```

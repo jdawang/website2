@@ -1,0 +1,22 @@
+name: Build and deploy site
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Render website
+        uses: quarto-dev/quarto-actions/render@v2
+
+      - name: Deploy website
+        uses: actions/upload-pages-artifact@v2

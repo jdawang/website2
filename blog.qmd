@@ -1,0 +1,25 @@
+---
+title: "Blog"
+listing:
+  contents: "blog"
+  sort: "date desc"
+  type: default
+  categories: numbered
+  sort-ui: true
+  filter-ui: true
+  fields:
+    - date
+    - reading-time
+    - title
+    - description
+    - image
+    - image-alt
+    - categories
+  max-description-length: 250
+  feed: true
+page-layout: full
+title-block-banner: false
+comments: false
+aliases: ["/blog/", "/posts/"]
+
+---

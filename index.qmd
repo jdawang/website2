@@ -1,0 +1,25 @@
+---
+title: ""
+image: files/profile.jpg
+image-alt: "Jacob Dawang profile picture"
+about:
+  template: jolla
+  links:
+    - icon: twitter
+      text: "@jacoobaloo"
+      href: https://twitter.com/jacoobaloo
+    - icon: github
+      text: jdawang
+      href: https://github.com/jdawang
+    - icon: linkedin
+      text: LinkedIn
+      href: https://www.linkedin.com/in/jacob-dawang/
+    - icon: mastodon
+      text: "@jacoobaloo@mstdn.ca"
+      href: "https://mstdn.ca/@jacoobaloo"
+    - icon: envelope
+      text: jdawang[at]gmail[dot]com
+      href: "mailto:jdawang@gmail.com"
+---
+
+Data scientist. Rock climber. Cyclist. Dabbler in politics and advocacy.

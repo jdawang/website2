@@ -1,0 +1,6 @@
+---
+title: "Projects"
+---
+
+- [Interactive map](https://jdawang.github.io/tdsb) of excess TDSB school capacity, population growth and zoning
+- [Interactive map](https://jdawang.github.io/heritage) of Toronto heritage designations, visible minority status, and income
