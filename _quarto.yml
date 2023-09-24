@@ -26,9 +26,9 @@ website:
   search: true
   navbar:
     left:
-      - about/index.qmd
+      - about.qmd
       - blog.qmd
-      - projects/index.qmd
+      - projects.qmd
     right: 
       - icon: rss
         href: blog.xml
