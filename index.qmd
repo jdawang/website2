@@ -18,8 +18,8 @@ about:
       text: "@jacoobaloo@mstdn.ca"
       href: "https://mstdn.ca/@jacoobaloo"
     - icon: envelope
-      text: jdawang[at]gmail[dot]com
-      href: "mailto:jdawang@gmail.com"
+      text: jacob@jacobdawang.com
+      href: "mailto:jacob@jacobdawang.com"
 ---
 
 Data scientist. Rock climber. Housing advocate. Recreational and utility cyclist.
