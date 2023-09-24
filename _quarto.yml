@@ -15,8 +15,8 @@ execute:
 website:
   title: "Jacob Dawang"
   image: files/profile.png
-  site-url: "https://jdawang.github.io"
-  repo-url: "https://github.com/jdawang/jdawang.github.io"
+  site-url: "https://www.jacobdawang.com"
+  repo-url: "https://github.com/jdawang/website2"
   description: Jacob Dawang's personal website
   favicon: files/favicon.ico
   twitter-card:
@@ -47,4 +47,3 @@ format:
     toc: false
 
 editor: visual
-

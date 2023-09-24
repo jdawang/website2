@@ -13,7 +13,7 @@ aliases: ["/posts/2022/04/mapping-tdsb-open-seat-accessibility-with-r5r/"]
 
 After reading a tweet about using [`r5r`](https://ipeagit.github.io/r5r/) for transit route analysis, I was inspired to try it out. I have always been interested in transit, and so this was an exciting way to marry my interest in data, transit, and cities.
 
-My previous [map](https://jdawang.github.io/tdsb) and post about [TDSB school capacity]({{< ref "/posts/mapping-tdsb" >}} "Mapping TDSB excess school capacity, population change and zoning") gives a good idea of where there is excess school capacity, and where capacity is constrained.
+My previous [map](https://jdawang.github.io/tdsb) and post about [TDSB school capacity](/blog/mapping-tdsb/) gives a good idea of where there is excess school capacity, and where capacity is constrained.
 But, it relies mostly on the placement of points, and the size of the points to visualize which neighbourhoods have excess school capacity.
 With `r5r`, I can add another way of visualizing school capacity: an isochrone map, showing how many empty seats are accessible from locations across Toronto.
 All I need to do is download an Open Street Map file for Toronto, and the [TTC's GTFS](https://open.toronto.ca/dataset/ttc-routes-and-schedules/), both open data.
