@@ -1,6 +1,6 @@
 ---
-title: "Mature Neighbourhoods in Edmonton"
-date: "2023-09-25"
+title: "Edmonton's Mature Neighbourhoods Need Growth"
+date: "2023-09-26"
 categories:
   - map
   - data
@@ -131,7 +131,7 @@ census_change_data_transformed <- census_change_data |>
 mature_neighbourhoods <- zoning_overlays |> filter(overlay_code == "MN")
 ```
 
-## I moved to Edmonton
+## Edmonton, final frontier of housing affordability
 
 In June, I moved across the country to Edmonton with my girlfriend who matched to residency at the Stollery hospital. Since then, I have gotten involved with [Grow Together Edmonton](https://growtogetheryeg.ca), a pro-housing organization that's starting to get off the ground.
 
@@ -153,7 +153,7 @@ These regulations are generally more restrictive than the zoning for the inner o
 
 Wherever you find a form of exclusionary zoning, like the MNO, you will inevitably find distortions, whether it be uneven population growth, income segregation or full schools in some neighbourhoods while others go empty. Being a data nerd, I put together some maps with census data (thanks to the [Tongfen](https://mountainmath.github.io/tongfen/) developers) and school data (thanks to [Yash Bhandari](https://github.com/Yash-Bhandari) for scraping).
 
-## Population growth
+## Population growth, or stagnation?
 
 Population growth in Edmonton is uneven. As shown in @fig-population-change, it's been the outer parts of Edmonton that have seen the most population growth over the past 20 years. Some other areas, like downtown have also seen growth. The inner geography, including mature neighbourhoods have largely remained stagnant or declined in population, even as the city as a whole [grew 52%](https://en.wikipedia.org/wiki/Demographics_of_Edmonton) over the past two decades.
 
@@ -241,7 +241,7 @@ ggplot(census_change_data_transformed |> st_intersection(mature_neighbourhoods))
   labs(fill="Population change (%), 2001-2021")
 ```
 
-## Housing growth
+## Edmonton has built housing outwards -- and pretty much only outwards
 
 Housing growth mirrors population growth as one would expect. Besides the outer suburbs, housing growth in most areas of Edmonton has stagnated as shown in @fig-dwellings.
 
@@ -268,7 +268,7 @@ ggplot(census_change_data_transformed %>% st_intersection(city_boundary)) +
   mno_annotation("black")
 ```
 
-Zooming into mature neighbourhoods in @fig-dwellings-mno, we can see there's been a few blocks here and there that have net added a significant amount of housing over the past 20 years. However, over most of the mature neighbourhoods area, there has been zero or slightly negative net dwelling growth.
+Zooming into mature neighbourhoods in @fig-dwellings-mno, we can see there's been a few blocks here and there that have net added a significant amount of housing over the past 20 years. However, over most of the mature neighbourhoods area, there has been zero or slightly negative net dwelling growth. There is plenty of room in existing neighbourhoods to build more housing, welcome more neighbours and make more efficient use of existing infrastructure and amenities.
 
 ```{r}
 #| label: fig-dwellings-mno
@@ -291,7 +291,7 @@ ggplot(census_change_data_transformed |> st_intersection(mature_neighbourhoods))
   labs(fill="Change in occupied private dwellings, 2001-2021")
 ```
 
-## School capacity
+## Schools in mature neighbourhoods have plenty of capacity
 
 I've heard that across the continent, one of the biggest "concerns" is lack of school space. But, as I showed in Toronto, [the opposite is usually true in mature neighbourhoods](https://jdawang.github.io/posts/2022/02/mapping-tdsb-excess-school-capacity-population-change-and-zoning/), where there is an overabundance of school capacity. I'd expect that to hold true in Edmonton as well since mature neighbourhoods have remained stagnant or declined in population, as we saw above.
 

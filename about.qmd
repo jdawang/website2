@@ -1,24 +1,31 @@
 ---
-title: "About"
+title: "About me"
 ---
 
-## Professional
+## Hi, I'm Jacob. Nice to meet you!
 
-I currently work as a data scientist at Capital One Canada.
-Working on the customer acquisitions team, I build and maintain core risk and valuations models that help us make approve/decline decisions and the amount of credit to extend to prospective customers.
+I'm a data scientist at Capital One Canada.
+Currently, I'm on the central tools team where I develop and maintain our suite of internal libraries used to build models.
+Previously, I worked on the customer acquisitions team, where I built our core risk and account-level valuations models used to decide whether and how much credit to lend to customers.
 
-Before I started my current job, I studied at the University of Waterloo (UW), where I graduated in 2019 with a bachelor of mathematics, honours in statistics and a minor in economic theory.
+Before I started at Capital One, I studied at the University of Waterloo (UW), where I graduated in 2019 with a bachelor of mathematics, with a major in statistics and a minor in economic theory.
 
-## Personal
+## Edmonton via Montreal, Waterloo, Toronto and Ottawa
 
-I'm originally from Montreal. Because of the co-op program at UW, I've had the chance to live in a few cities during my studies:
+I am currently based in Edmonton, having followed my partner here for her medical residency.
+I have luckily had the chance to experience living in a handful of cities across Canada.
+While I'm originally from Montreal, the co-op program at UW allowed me live in a few cities during my studies:
 
-- Waterloo, while studying and working as a NSERC research assistant
-- Ottawa, while working as a research intern at Statistics Canada
-- Toronto, while working as a data scientist co-op at Capital One
+- Waterloo, while studying and working as a NSERC research assistant.
+- Ottawa, while working as a research intern at Statistics Canada.
+- Toronto, while working as a data scientist co-op at Capital One.
 
 I appreciated getting the chance to live in each of these cities for an extended period of time, and I think it allowed me to get to know each place in a way that just visiting would not have.
 
-In my spare time, I enjoy cycling, both for transportation and fitness, baking artisan-style bread, and rock climbing. I am actively involved in housing advocacy at [More Neighbours Toronto](https://www.moreneighbours.ca/), where we work to break down the barriers that prevent badly needed new housing from being built. A few times a year, I'll go on a reading binge, devouring multiple books in the span of a weekend. Sometimes, when I don't feel like it's just working more, I'll do a little data-related side project that is a bit different from my work, just so I don't feel like I'm working on my own spare time.
+I am actively involved in housing advocacy at [Grow Together Edmonton](https://www.gtyeg.ca/), where we work to break down the barriers that prevent housing from being built.
+When I was in Toronto, I was a core advocate with [More Neighbours Toronto](https://www.moreneighbours.ca).
 
-
+In the rest of my time, I enjoy rock climbing, cycling and baking bread.
+A few times a year, I'll go on a reading binge, devouring multiple books in the span of a weekend.
+Sometimes, when I don't feel like it's just working more, I'll do a little data-related side project that is different from my work, so I don't feel like I'm working on my own spare time.
+That's mostly what you'll see in [my blog](/blog.qmd)
