@@ -17,6 +17,7 @@ execute:
   echo: false
   message: false
   warning: false
+  cache: true
 
 author:
  - name: Jacob Dawang

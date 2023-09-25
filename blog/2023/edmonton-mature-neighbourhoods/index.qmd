@@ -1,0 +1,355 @@
+---
+title: "Mature Neighbourhoods in Edmonton"
+date: "2023-09-25"
+categories:
+  - map
+  - data
+  - schools
+  - edmonton
+  - zoning
+  - housing
+execute: 
+  cache: true
+notebook-links: global
+---
+
+```{r}
+#| include: false
+renv::use(lockfile = "renv.lock")
+library(googledrive)
+library(sf)
+library(readr)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(cancensus)
+library(tongfen)
+library(ggplot2)
+library(gt)
+# options(cancensus.api_key=readline())
+```
+
+```{r}
+city_boundary <- read_sf("data/City of Edmonton - Corporate Boundary (current).geojson")
+```
+
+```{r}
+# Zoning overlays from https://data.edmonton.ca/Administrative/Zoning-Overlays/6w3s-58pv
+zoning_overlays <- read_sf("data/zoning_overlays.geojson")
+school_data_path <- "data/edmonton_schools.csv"
+
+if(file.exists(school_data_path)) {
+  school_data <- read_csv(school_data_path)
+} else {
+  school_data <- drive_download(
+    as_id("1Io0h__NwH92D1bS662-LbMnJYTz45Z2bDRCmqyJlA3I"),
+    path=school_data_path,
+    type="csv"
+  )
+}
+
+school_data <- school_data |>
+  rename_all(
+    function(c) {
+      str_to_lower(c) |> 
+        str_replace_all(fixed(" "), "_") |> 
+        str_remove_all(fixed("?"))
+    }
+  ) |>
+  separate_wider_delim(
+    coords,
+    ", ",
+    names=c("lat", "long")
+  ) |>
+  mutate(lat=as.numeric(lat), long=as.numeric(long)) |>
+  filter(!is.na(lat), !is.na(long)) |>  # TODO: remove filter, one school excluded
+  st_as_sf(coords=c("long", "lat"), crs=st_crs(zoning_overlays))
+```
+
+```{r}
+census_variables_2021 <- c(
+  population_2016="v_CA21_2",
+  population_2021="v_CA21_1",
+  population_percent_change_2016_2021="v_CA21_3",
+  median_household_income_2021="v_CA21_906"
+)
+
+census_variables_common <- c(
+  population_2021="v_CA21_1",
+  total_private_dwellings_2021="v_CA21_4",
+  total_occupied_private_dwellings_2021="v_CA21_434",
+  single_detached_2021="v_CA21_435",
+  semi_detached_2021="v_CA21_436",
+  row_house_2021="v_CA21_437",
+  duplex_2021="v_CA21_438",
+  apartment_lt_five_storeys_2021="v_CA21_439",
+  apartment_gte_five_storeys_2021="v_CA21_440",
+  other_single_attached_2021="v_CA21_441",
+  movable_dwelling_2021="v_CA21_442",
+  population_2001="v_CA01_2",
+  total_occupied_private_dwellings_2001="v_CA01_112",
+  single_detached_2001="v_CA01_113",
+  semi_detached_2001="v_CA01_114",
+  row_house_2001="v_CA01_115",
+  duplex_2001="v_CA01_116",
+  apartment_gte_five_storeys_2001="v_CA01_117",
+  apartment_lt_five_storeys="v_CA01_118",
+  other_single_attached_2001="v_CA01_119",
+  movable_dwelling_2001="v_CA01_120"
+)
+
+meta <- meta_for_ca_census_vectors(census_variables_common)
+
+census_change_data <- get_tongfen_ca_census(
+  regions=list(CSD="4811061"),  # Edmonton CSD
+  meta=meta,
+  level="DA",
+  base_geo="CA21",
+  crs=st_crs(zoning_overlays)
+)
+
+census_data_2021 <- get_census(
+  dataset="CA21",
+  regions=list(CSD="4811061"),
+  vectors=census_variables_2021,
+  level="DA",
+  geo_format="sf"
+) |>
+  st_transform(st_crs(zoning_overlays))
+```
+
+```{r}
+census_change_data_transformed <- census_change_data |>
+  mutate(
+    population_change_pct=population_2021 / population_2001 - 1,
+    dwellings_change=total_occupied_private_dwellings_2021 - total_occupied_private_dwellings_2001,
+    dwellings_change_pct=dwellings_change / total_occupied_private_dwellings_2001
+  )
+```
+
+```{r}
+mature_neighbourhoods <- zoning_overlays |> filter(overlay_code == "MN")
+```
+
+## I moved to Edmonton
+
+In June, I moved across the country to Edmonton with my girlfriend who matched to residency at the Stollery hospital. Since then, I have gotten involved with [Grow Together Edmonton](https://growtogetheryeg.ca), a pro-housing organization that's starting to get off the ground.
+
+Edmonton has long been a leader in land use in Canada, ending single-family zoning in 2019 and removing minimum parking requirements in 2020. When I advocated with More Neighbours Toronto, we often used Edmonton as an example of how permitting more housing could create the conditions for market housing affordability.
+
+Being an early adopter of zoning reform has largely worked. Housing in Edmonton is still affordable, relative to other Canadian cities. We had no problem finding a suitable rental apartment in a walkable neighbourhood -- for the same price as a bachelor apartment in downtown Toronto. We were even able to negotiate rent decreases because of long vacancies, something that is unheard of in Ontario. However, Edmonton is starting to see [rents increase quickly](https://edmontonjournal.com/news/local-news/rents-may-rise-in-edmonton-as-vacancy-rate-hits-10-year-low-affordability-crunched), like the rest of Canada as it grapples with increases in demand and the limitations of sprawl.
+
+## Zoning by-law renewal
+
+The good news: City Planning is bringing its final proposal for [Zoning By-Law](https://www.edmonton.ca/city_government/urban_planning_and_design/zoning-bylaw-renewal) renewal to council on October 16. This is mostly a simplification of the number of zones, but also includes an important step of removing the [Mature Neighbourhood Overlay](https://www.edmonton.ca/sites/default/files/public-files/ZBRI-MNO-Retirement.pdf?cb=1694919673) (MNO). The MNO is an additional zoning regulation that has the effect of restricting new housing in some of Edmonton's central, most in-demand neighbourhoods. It includes such hits as:
+
+-   Controlling window locations.
+
+-   Imposing large front setbacks, perpetuating wasteful land use on front lawns.
+
+-   Maximum heights of 8.9m.
+
+These regulations are generally more restrictive than the zoning for the inner or outer suburbs. This seems counterintuitive, as the most central neighbourhoods generally have the most demand and should thus have more permissive zoning.
+
+Wherever you find a form of exclusionary zoning, like the MNO, you will inevitably find distortions, whether it be uneven population growth, income segregation or full schools in some neighbourhoods while others go empty. Being a data nerd, I put together some maps with census data (thanks to the [Tongfen](https://mountainmath.github.io/tongfen/) developers) and school data (thanks to [Yash Bhandari](https://github.com/Yash-Bhandari) for scraping).
+
+## Population growth
+
+Population growth in Edmonton is uneven. As shown in @fig-population-change, it's been the outer parts of Edmonton that have seen the most population growth over the past 20 years. Some other areas, like downtown have also seen growth. The inner geography, including mature neighbourhoods have largely remained stagnant or declined in population, even as the city as a whole [grew 52%](https://en.wikipedia.org/wiki/Demographics_of_Edmonton) over the past two decades.
+
+```{r}
+#| label: fig-population-change
+#| fig-cap: Edmonton population change (%) from 2001-2021
+
+mno_annotation <- function(colour) {
+  mno_arrow <- geom_curve(
+    data = data.frame(
+      x = -113.655158031587, 
+      y = 53.6409070468147, 
+      xend = -113.578201184064, 
+      yend = 53.5660999765991
+    ),
+    mapping = aes(x = x, y = y, xend = xend, yend = yend),
+    curvature = 0.395, 
+    arrow = arrow(
+      30L, 
+      unit(0.1, "inches"),
+      "last", "closed"
+    ),
+    inherit.aes = FALSE,
+    colour=colour
+  )
+  mno_text <- geom_text(
+    data = data.frame(
+      x = -113.625409012325, 
+      y = 53.673, 
+      label = "Mature\nNeighbourhoods"
+    ),
+    mapping = aes(
+      x = x, 
+      y = y, 
+      label = label
+    ),
+    colour=colour,
+    inherit.aes = FALSE
+  )
+  return(list(mno_text, mno_arrow))
+}
+
+ggplot(census_change_data_transformed %>% st_intersection(city_boundary)) +
+  geom_sf(aes(fill=population_change_pct), colour="lightgrey") +
+  scale_fill_fermenter(
+    type="div", 
+    palette="PiYG", 
+    breaks=c(-0.3, -0.2, -0.1, -0.05, 0.05, 0.1, 0.2, 0.3),
+    labels=scales::label_percent(),
+    show.limits=FALSE,
+    right=TRUE,
+    direction=1
+  ) +
+  geom_sf(data=st_boundary(mature_neighbourhoods), colour="blue", linewidth=0.6) +
+  theme_void() +
+  theme(legend.position="bottom") +
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top")) +
+  labs(fill="Population change (%), 2001-2021") +
+  mno_annotation("blue")
+
+```
+
+Zooming into the MNO for a closer look in @fig-population-change-mno, it's the same story. Neighbourhoods have largely declined in population or remained stagnant. Remember: a 5-10% increase is really nothing compared to 52% growth for the city overall.
+
+This means that many neighbourhoods should have latent infrastructure to accommodate future growth. Especially with appliances becoming increasingly more energy efficient, concerns about not having enough infrastructure are unfounded in many cases and can otherwise be addressed through just building more. In all cases, statements saying mature neighbourhoods are "full" are just patently false.
+
+```{r}
+#| label: fig-population-change-mno
+#| fig-cap: Population change (%) from 2001-2021 in mature neighbourhoods
+
+ggplot(census_change_data_transformed |> st_intersection(mature_neighbourhoods)) +
+  geom_sf(aes(fill=population_change_pct), colour="lightgrey") +
+  scale_fill_fermenter(
+    type="div", 
+    palette="PiYG", 
+    breaks=c(-0.3, -0.2, -0.1, -0.05, 0.05, 0.1, 0.2, 0.3),
+    labels=scales::label_percent(),
+    show.limits=FALSE,
+    right=TRUE,
+    direction=1
+  ) +
+  theme_void() +
+  theme(legend.position="bottom") +
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top")) +
+  labs(fill="Population change (%), 2001-2021")
+```
+
+## Housing growth
+
+Housing growth mirrors population growth as one would expect. Besides the outer suburbs, housing growth in most areas of Edmonton has stagnated as shown in @fig-dwellings.
+
+```{r}
+#| label: fig-dwellings
+#| fig-cap: Net change in dwellings (%), 2001-2021
+
+ggplot(census_change_data_transformed %>% st_intersection(city_boundary)) +
+  geom_sf(aes(fill=dwellings_change_pct), colour=NA) +
+  scale_fill_fermenter(
+    type="div", 
+    palette="BrBG", 
+    breaks=c(-0.3, -0.2, -0.1, -0.05, 0.05, 0.1, 0.2, 0.3),
+    labels=scales::label_percent(),
+    show.limits=FALSE,
+    right=TRUE,
+    direction=1
+  ) +
+  geom_sf(data=st_boundary(mature_neighbourhoods), colour="black", linewidth=0.73) +
+  theme_void() +
+  theme(legend.position="bottom") +
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top")) +
+  labs(fill="Change in occupied private dwellings, 2001-2021") +
+  mno_annotation("black")
+```
+
+Zooming into mature neighbourhoods in @fig-dwellings-mno, we can see there's been a few blocks here and there that have net added a significant amount of housing over the past 20 years. However, over most of the mature neighbourhoods area, there has been zero or slightly negative net dwelling growth.
+
+```{r}
+#| label: fig-dwellings-mno
+#| fig-cap: Net change in dwellings (%) from 2001-2021 in mature neighbourhoods
+
+ggplot(census_change_data_transformed |> st_intersection(mature_neighbourhoods)) +
+  geom_sf(aes(fill=dwellings_change_pct), colour="lightgrey") +
+  scale_fill_fermenter(
+    type="div", 
+    palette="BrBG", 
+    breaks=c(-0.3, -0.2, -0.1, -0.05, 0.05, 0.1, 0.2, 0.3),
+    labels=scales::label_percent(),
+    show.limits=FALSE,
+    right=TRUE,
+    direction=1
+  ) +
+  theme_void() +
+  theme(legend.position="bottom") +
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top")) +
+  labs(fill="Change in occupied private dwellings, 2001-2021")
+```
+
+## School capacity
+
+I've heard that across the continent, one of the biggest "concerns" is lack of school space. But, as I showed in Toronto, [the opposite is usually true in mature neighbourhoods](https://jdawang.github.io/posts/2022/02/mapping-tdsb-excess-school-capacity-population-change-and-zoning/), where there is an overabundance of school capacity. I'd expect that to hold true in Edmonton as well since mature neighbourhoods have remained stagnant or declined in population, as we saw above.
+
+In Edmonton, schools have assigned Growth Control Model (GCM) levels:
+
+-   Level 1: open boundaries.
+
+-   Level 2: nearing capacity.
+
+-   Level 3: at capacity.
+
+As shown in @fig-school-level, most schools are at GCM level 1, however, there are far more schools at GCM level 2 and 3 outside mature neighbourhoods than within. Very few schools are above GCM level 1 within mature neighbourhoods.
+
+```{r}
+#| label: fig-school-level
+#| fig-cap: GCM level at each public school in Edmonton
+
+ggplot(school_data) +
+  geom_sf(aes(colour=factor(gcm_level))) +
+  scale_colour_brewer(type="seq", palette="OrRd") +
+  geom_sf(data=st_boundary(mature_neighbourhoods), colour="steelblue") +
+  geom_sf(data=st_boundary(city_boundary)) +
+  theme_void() +
+  theme(legend.position="bottom") +
+  labs(colour="GCM level") +
+  mno_annotation("steelblue")
+```
+
+Just how big is the difference? A full third of schools outside mature neighbourhoods are in GCM level 2 or above, versus only 6% within mature neighbourhoods as shown in @tbl-schools.
+
+```{r}
+#| label: tbl-schools
+#| tbl-cap: Number of schools by GCM level and mature neighbourhood.
+
+school_data %>%
+  st_drop_geometry() %>%
+  mutate(mature_neighbourhood=ifelse(mature_neighbourhood, "Yes", "No")) %>%
+  group_by(mature_neighbourhood, gcm_level) %>%
+  summarize(n=n()) %>%
+  mutate(pct=n / sum(n), entry=glue::glue("{n}\n({scales::label_percent()(pct)})"), .keep="unused") %>%
+  ungroup() %>%
+  pivot_wider(id_cols=mature_neighbourhood, names_from=gcm_level, values_from=entry) %>%
+  mutate(`3`=coalesce(`3`, "0 (0%)")) %>%
+  gt() %>%
+  tab_header("Number of Schools by GCM level") %>%
+  tab_spanner("GCM level", c(`1`, `2`, `3`)) %>%
+  cols_label(mature_neighbourhood ~ "Mature Neighbourhood") %>%
+  tab_source_note("School data courtesy of Yash Bhandari.")
+```
+
+## Take action
+
+The Zoning By-Law renewal comes up for a public hearing on October 16. Please use [Grow Together Edmonton's tool](https://www.gtyeg.ca/#take-action) to email your councillor in support of the renewal. If you can, please sign up to speak atht epublic hearing. Signing up only takes a minute:
+
+1.  [Follow this link](https://docs.google.com/forms/d/e/1FAIpQLSfjK1JQOPRWVORUVKsSbRn3yLN5E9vcVLu3nifMO4N1ZfmgFg/viewform)
+
+2.  Select "Public Hearing" and enter October 16 as the date
+
+3.  Where it asks for the agenda number and title, enter: 3.1 Zoning Bylaw Renewal
+
+4.  Select "In Favour" as your position
