@@ -27,3 +27,4 @@ comments:
   giscus:
     repo: jdawang/website2
     input-position: top
+    category: Comments
