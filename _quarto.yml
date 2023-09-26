@@ -10,7 +10,7 @@ project:
 
 
 execute:
-  freeze: auto
+  freeze: true
 
 website:
   title: "Jacob Dawang"
