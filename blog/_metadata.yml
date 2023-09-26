@@ -17,6 +17,8 @@ execute:
   echo: false
   message: false
   warning: false
+  cache: true
+  freeze: true
 
 author:
  - name: Jacob Dawang
@@ -24,3 +26,6 @@ author:
 comments: 
   giscus:
     repo: jdawang/website2
+    input-position: top
+    category: Comments
+    theme: transparent_dark

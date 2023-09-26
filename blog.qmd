@@ -21,5 +21,4 @@ page-layout: full
 title-block-banner: false
 comments: false
 aliases: ["/blog/", "/posts/"]
-
 ---

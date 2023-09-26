@@ -5,12 +5,12 @@ project:
   render:
     - "*.qmd"
     - "blog/**/*.md"
-    - "blog/election-maps-2022/index.md"
-    - "!blog/election-maps-2022/index.qmd"
+    - "!blog/2022/election-maps-2022/index.qmd"
+    - "!README.md"
 
 
 execute:
-  freeze: auto
+  freeze: true
 
 website:
   title: "Jacob Dawang"
