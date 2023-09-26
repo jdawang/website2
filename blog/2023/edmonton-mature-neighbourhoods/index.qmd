@@ -10,6 +10,7 @@ categories:
   - housing
 execute: 
   cache: true
+  freeze: true
 notebook-links: global
 ---
 
