@@ -345,7 +345,7 @@ school_data %>%
 
 ## Take action
 
-The Zoning By-Law renewal comes up for a public hearing on October 16. Please use [Grow Together Edmonton's tool](https://www.gtyeg.ca/#take-action) to email your councillor in support of the renewal. If you can, please sign up to speak atht epublic hearing. Signing up only takes a minute:
+The Zoning By-Law renewal comes up for a public hearing on October 16. Please use [Grow Together Edmonton's tool](https://www.gtyeg.ca/#take-action) to email your councillor in support of the renewal. If you can, please sign up to speak at the public hearing. Signing up only takes a minute:
 
 1.  [Follow this link](https://docs.google.com/forms/d/e/1FAIpQLSfjK1JQOPRWVORUVKsSbRn3yLN5E9vcVLu3nifMO4N1ZfmgFg/viewform)
 
