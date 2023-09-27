@@ -1,8 +1,9 @@
 ---
 title: Migrating my Blog from Hugo to Quarto
-date: "2023-09-27"
+date: "2023-10-03"
 categories:
   - meta
+image: https://posit.co/wp-content/uploads/2022/10/thumbnail-2.jpg
 ---
 
 If you visited my old website in 2022, you'll have noticed that things have changed around here.
