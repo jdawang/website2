@@ -1,0 +1,43 @@
+---
+title: Migrating my Blog from Hugo to Quarto
+date: "2023-09-27"
+categories:
+  - meta
+---
+
+If you visited my old website in 2022, you'll have noticed that things have changed around here.
+The biggest change is that I migrated the rendering engine from [Hugo](https://gohugo.io/) to [Quarto](https://quarto.org/).
+Why?
+Because a lot of my blog posts are computational and Quarto just works more easily for this purpose.
+
+At the same time, I migrated from my `.github.io` domain to a custom `jacobdawang.com` domain which I purchased from Cloudflare for about $10 a year.
+To make this a triple whammy, I also migrated from GitHub pages to Cloudflare pages.
+
+I have a [GitHub action workflow](https://github.com/jdawang/website2/blob/ec10dc942684ebeb9472c77209fa2a12e4febbad/.github/workflows/build-and-deploy.yml) set up to render and push the built site to Cloudflare pages on pushes to `main` and pull requests. 
+
+Here are five tips from my experience doing the migration:
+
+1. For some reason, a top-level `freeze: true` in `_quarto.yml` was not enough to ensure individual blog posts don't re-execute. I had to put `freeze: true` all the way down to the individual files.
+2. Quarto builds pages with ugly links (ending in `.html`). Luckily Cloudflare automatically serves websites with pretty links, so you can navigate to `/blog` instead of `/blog.html`.
+3. Deploying to a custom domain is actually really easy and I'm not sure why I didn't do this in the past.
+4. [Giscus](https://giscus.app/) is a really cool way of integrating comments. I think the GitHub login requirement will lead to very few comments, but it's still cool in theory.
+5. If you're restructuring your repo like I did, you can use the `aliases` Quarto option for each page so that the paths don't change.
+6. On a similar note, to automatically redirect from my `github.io` domain to my custom domain, I copied my new Quarto repo into my old one and just put the following in `_quarto.yml`, which includes an html redirect in every file to the corresponding path on my new domain:
+   
+   ```yaml
+   format:
+     html:
+       theme:
+         light: cosmo
+         dark: solar
+       css: styles.css
+       toc: false
+       include-in-header: 
+         text: |
+           <meta http-equiv="refresh" content="0; url=https://www.jacobdawang.com">
+           <script type="text/javascript">
+           window.location.href = "https://" + "www.jacobdawang.com" + window.location.pathname
+           </script>
+   ```
+
+I know this will be a niche post, but if you're into R and Quarto, I hope you enjoyed!
