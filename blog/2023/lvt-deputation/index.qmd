@@ -1,0 +1,23 @@
+---
+title: "I Deputed for a Land Value Tax at Edmonton City Council"
+date: "2023-09-29"
+categories:
+  - land value tax
+  - edmonton
+image: lvt-deputation.png
+---
+
+Last week, Edmonton's Urban Planning Committee met to decide what to do about the [abundance of surface parking lots](https://www.cbc.ca/news/canada/edmonton/edmonton-considers-options-for-abundance-of-downtown-parking-lot-eyesores-1.6968984) in downtown.
+Surface parking lots are a wasteful land use in central areas, near transit and many people want to see them redeveloped.
+Ultimately, the committee chose to punt the question about what to do back to staff, as they didn't want to penalize landowners who wanted to be in compliance with the by-law, but could not immediately develop or sell their land, at least for what they want to build.
+
+In the long term, the best way to deal with underused land in valuable areas is by levying a land value tax (LVT) -- like property tax, but excluding improvements.
+A LVT increases the carrying cost of underused land and decreases taxes on efficient development of land.
+It disincentivizes speculation and landhoarding, and incentivizes redevelopment.
+This is exactly the reason why Detroit's mayor, Mike Duggan, has put forward a [LVT plan](https://detroitmi.gov/news/mayor-duggan-introduces-land-value-tax-plan-cut-taxes-homeowners-hold-land-speculators-accountable) to deal with blight in his city.
+
+While there are barriers to introducing a LVT on a municipal level, namely that the province would have to change legislation, a LVT is just a better tax than property tax.
+It's never too early to raise awareness of better taxation options.
+Here's my deputation for a LVT at Edmonton's Urban Planning Committee:
+
+{{< video https://www.youtube.com/watch?v=kQMN1UsHFz8 >}}
