@@ -17,6 +17,8 @@ website:
   image: files/profile.png
   site-url: "https://www.jacobdawang.com"
   repo-url: "https://github.com/jdawang/website2"
+  repo-actions: source
+  repo-branch: main
   description: Jacob Dawang's personal website
   favicon: files/favicon.ico
   twitter-card:
