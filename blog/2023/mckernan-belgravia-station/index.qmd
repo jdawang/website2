@@ -9,7 +9,7 @@ categories:
   - transit
   - edmonton
 execute: 
-  cache: refresh
+  cache: true
   freeze: true
 link-external-newwindow: true
 link-external-icon: true
@@ -216,9 +216,7 @@ station_area_plot <- function(
 }
 ```
 
-The fight for better zoning was [fought and won](https://edmonton.citynews.ca/2023/10/24/edmonton-new-zoning-bylaw/) at Edmonton City Council about a month ago -- and it wasn't even close. Council voted 11-2 in favour of adopting the new zoning without immediate amendments. At a minimum, infill will be allowed on every lot up to 8 units and 10.5m. As well, the vast majority of future study motions with the goal of watering down the new zoning by-law were voted down.
-
-Onwards to [district planning](https://www.edmonton.ca/city_government/urban_planning_and_design/district-planning) which is in it's final stage of consultation. District planning will define the borders of "nodes and corridors" where site-specific rezonings for higher density are likely to be supported. While I generally disagree with this approach that concentrates higher density along higher-trafficked roads, that is the scope and compromise of the initiative.
+Edmonton's [district planning](https://www.edmonton.ca/city_government/urban_planning_and_design/district-planning) is in the final stage of consultation. District planning will define the borders of "nodes and corridors" where site-specific rezonings for higher density are likely to be supported. While I generally disagree with the approach that concentrates higher density along higher-trafficked roads, that is the scope and compromise of the initiative.
 
 However, even within the nodes and corridors approach, the city is missing an opportunity for transit-oriented development around some of its LRT stations in secondary corridors. This comes at the same time as the BC provincial government just announced a huge upzoning around *every* rapid transit station and even bus exchanges.
 
@@ -248,7 +246,7 @@ Primary corridors will support:
 
 -   Tall high-rise (\>21 storeys) at sites that meet the same criteria as high rise, but where the context allows for "appropriate transition to the surrounding development".
 
-Secondary corridors will support low-rise (up to 4 storeys) throughout and mid-rise along the main streets. Transition to lower density will be supported along the edges of the secondary corridor. There are no provisions for additional density near rapid transit stations.
+Secondary corridors will support low-rise (up to 4 storeys) throughout and mid-rise along the main streets. Transition to lower density will be supported along the edges of secondary corridors. There are no provisions for additional density within secondary corridors near rapid transit stations or around rapid transit stations that are not within a node or corridor.
 
 ## Two decades of little growth {#sec-growth-or-not}
 
@@ -342,7 +340,7 @@ census_except_belmac <- census_data %>%
   filter(!(TongfenID %in% pull(census_belmac, TongfenID)))
 ```
 
-Now that the census station area is well-defined, we can divide Edmonton into the McKernan/Belgravia Station area and everywhere else in the city except for the station area. As shown in @fig-overall-growth-bar, the station area trailed the rest of the city by a lot in both dwellings growth and population growth over the past two decades. This is not a novel fact: it is well-known that the vast majority of Edmonton's growth has come from greenfield sprawl while the mature neighbourhoods have largely [remained static](/blog/2023/edmonton-mature-neighbourhoods/index.html). But, most of the rest of Edmonton doesn't have a high-quality rapid transit station within walking distance.
+Now that the census station area is well-defined, we can divide Edmonton into the McKernan/Belgravia Station area and the *Rest of Edmonton*. As shown in @fig-overall-growth-bar, the station area trailed the rest of the city by a lot in both dwellings growth and population growth over the past two decades. This is not a novel fact: it is well-known that the vast majority of Edmonton's growth has come from greenfield sprawl while the mature neighbourhoods have largely [remained static](/blog/2023/edmonton-mature-neighbourhoods/index.html). But, most of the *Rest of Edmonton* doesn't have a major transit station within walking distance.
 
 ```{r}
 #| label: fig-overall-growth-bar
@@ -387,7 +385,10 @@ bind_rows(
 
 ```
 
-Since we have data on a DB level, we can also look at population and dwelling growth spatially in @fig-cum-change-belmac-absolute and @fig-cum-change-belmac-percent. Dwelling and population growth has mostly occurred on the east side of 114 St and the LRT line in McKernan and two DBs in Belgravia on either side of 76 Ave where low-rise apartments were redeveloped into higher density low-rise apartments, as can be seen on [streetview](https://maps.app.goo.gl/jRp3fd9zHKB7C85r6).
+Since we have data on a DB level, we can also look at population and dwelling growth spatially in @fig-cum-change-belmac-absolute and @fig-cum-change-belmac-percent. Dwelling and population growth has mostly occurred in two places:
+
+1.  On the east side of 114 St and the LRT line in McKernan.
+2.  Two DBs in Belgravia on either side of 76 Ave where low-rise apartments were redeveloped into higher density low-rise apartments, as can be seen on [streetview](https://maps.app.goo.gl/jRp3fd9zHKB7C85r6).
 
 ::: column-page-inset
 ::: panel-tabset
@@ -588,7 +589,7 @@ belmac_census_over_census_data <- census_data_long %>%
 
 ```
 
-Once again, we can break down the census-over-census change by DB, as shown in @fig-belmac-census-over-census-change-absolute and @fig-belmac-census-over-census-change-percent. We can see the driver of the increase in dwellings in 2011-2016 being the demolition (seen in 2005-2011) and subsequent replacement of the aforementioned low-rise apartments on 76 Ave west of the station. We can also see the second demolition and replacement of low-rise apartments happen across the street in 2016-2021. More recently, we can see the demolition of mostly single-family homes north of the station along University Ave with under construction (at the time) mid-rise apartments that should increase dwellings and population in those blocks in the upcoming census. Most other blocks have largely had very gentle intensification or largely remained static.
+Once again, we can break down the census-over-census change by DB, as shown in @fig-belmac-census-over-census-change-absolute and @fig-belmac-census-over-census-change-percent. We can see the driver of the increase in dwellings in 2011-2016 being the demolition (seen in 2006-2011) and subsequent replacement of the aforementioned low-rise apartments on 76 Ave west of the station. We can also see the second demolition and replacement of low-rise apartments happen across the street in 2016-2021. More recently, we can see the demolition of mostly single-family homes north of the station along University Ave with under construction (at the time) mid-rise apartments that should increase dwellings and population in those blocks in the upcoming census. Most other blocks have largely intensified very gently or remained static.
 
 ::: panel-tabset
 ### Absolute change
@@ -679,7 +680,7 @@ To sum up:
 
 -   The second major driver of growth seems to be construction of new mid-rise apartments on the University Ave car sewer. As [others have argued](https://thetyee.ca/Analysis/2021/10/25/Confining-Rental-Homes-To-Busy-Roads-Devil-Bargain/), it is profoundly unequal to confine apartments to busy roads.
 
-## More transit-oriented development needed from district plan {#sec-no-tod-planned-here}
+## District plans need more transit-oriented development {#sec-no-tod-planned-here}
 
 While the census shows what happened in the past, zoning and district plans together show what we can expect for the future. Data for the new zoning is not yet available, so I pieced it together using the [City's interactive map](https://gis.edmonton.ca/portal/apps/webappviewer/?appalias=CityWideRezoning&id=dd3a43995e7a4e62a46b4c1599a8c8a4) and the equivalences listed in the new zoning bylaw. Data for the nodes and corridors of district planning is also not available so I have drawn these borders manually based on the images in the Scona district plan.
 
@@ -740,7 +741,7 @@ potential_residential_area_prop <- as.numeric(st_area(st_union(potential_residen
 
 ```
 
-But, that doesn't tell the whole story, as some plots are zoned for parks, fire halls and other jurisdictions, where housing is very unlikely to be built, even through a rezoning. @Fig-nodes-corridors-residential shows the coverage of nodes and corridors when we exclude these zones. The major node to the north at the University of Alberta no longer plays any role in the McKernan/Belgravia Station area. Using this map, only `r scales::label_percent(accuracy=1)(potential_residential_area_prop)` of the station area is covered by the secondary corridors that will support up to 8 storeys.
+But, that doesn't tell the whole story, as some plots are zoned for parks, fire halls and other jurisdictions, where housing is unlikely to be built, even through a rezoning. @Fig-nodes-corridors-residential shows the coverage of nodes and corridors when we exclude these zones. The major node to the north at the University of Alberta no longer plays any role in the McKernan/Belgravia Station area. Using this map, only `r scales::label_percent(accuracy=1)(potential_residential_area_prop)` of the station area is covered by the secondary corridors that will support up to 8 storeys.
 
 ```{r}
 #| label: fig-nodes-corridors-residential
@@ -789,7 +790,7 @@ nodes_corridors_buildable_prop <- as.numeric(
 )
 ```
 
-Why stop there? Through DC zoning, local knowledge and some streetview, I identified some sites within the secondary corridor that are either existing, under construction or planned low to mid-rise apartments, shown in @fig-nodes-corridors-planned. I have also excluded the super wide 114 St/LRT right-of-way. While arguably one of the older low-rise apartments on the site furthest east along 76 Ave could see an increase in permissions and redevelop, the rest of the sites identified are relatively new and are unlikely to benefit from the secondary corridor permissions. When we remove these sites and the right-of-way, only `r scales::label_percent(accuracy=1)(nodes_corridors_buildable_prop)` of the station area remains covered by secondary corridors that will support up to 8 storeys.
+Why stop there? Through DC zoning, local knowledge and some streetview, I identified some sites within the secondary corridor that are either existing, under construction or planned low to mid-rise apartments, shown in @fig-nodes-corridors-planned. I have also excluded the wide 114 St/LRT right-of-way. While arguably one of the older low-rise apartments on the site furthest east along 76 Ave could see an increase in permissions and redevelop, the rest of the sites identified are relatively new and are unlikely to benefit from the secondary corridor permissions. When we remove these sites and the right-of-way, only `r scales::label_percent(accuracy=1)(nodes_corridors_buildable_prop)` of the station area remains covered by secondary corridors that will support up to 8 storeys.
 
 ```{r}
 #| label: fig-nodes-corridors-planned
@@ -828,7 +829,7 @@ station_area_plot(
 )
 ```
 
-I've stitched all of this together in an animation below in @fig-nodes-corridors-animated, if you want to see the progression as we remove more and more sites that won't really see much higher density than today under the nodes and corridors of district planning. Remember that BC's new legislation applied to McKernan/Belgravia Station would support 8 storeys over 100% of the station area (minus parks, fire halls, etc) and even taller buildings within the 400m and 200m radii.
+I've stitched all of this together in an animation below in @fig-nodes-corridors-animated, to show the progression as we remove more and more sites that probably won't see higher density than today under the proposed district plan. Remember that BC's new legislation applied to McKernan/Belgravia Station would support 8 storeys over 100% of the station area (minus parks, fire halls, etc) and even taller buildings within the 400m and 200m radii. So even the generous `r scales::label_percent(accuracy=1)(area_prop_raw)` node and corridor area coverage using the raw data is conservative in comparison.
 
 ```{r}
 #| label: fig-nodes-corridors-animated
@@ -867,12 +868,12 @@ station_area_plot(
   transition_manual(factor(state, levels=c("All", "Only RS, RM and MU zones", "Existing and planned density identified within the corridors", "Excluding existing and planned low-rise and mid-rise apartments")))
 ```
 
-## What should happen
+## Conclusion and how to move forward
 
-The Scona district plan is certainly an improvement on the area redevelopment plan, allowing higher densities along the main streets of 76 Ave and 114 St. However, we need to fully leverage every one of the few rapid transit stations in Edmonton to avoid a spreading Canadian housing crisis, dial back sprawl and achieve the city's target of 50% infill development. BC's government has set a new bar in Canada for transit-oriented development and that's where we should start. There is no good reason why a random point between the four-lane stroads of Calgary Trail and Gateway should be designated for high density, but a site that's a five minute walk from McKernan/Belgravia Station should only be designated for low density.
+The Scona district plan is certainly an improvement on the area redevelopment plan, allowing higher densities along 76 Ave and 114 St. However, we need to fully leverage every one of the few rapid transit stations in Edmonton to avoid a spreading Canadian housing crisis, dial back sprawl and achieve the city's target of 50% infill development. BC's government has set a new bar in Canada for transit-oriented development and that's where we should start. There is no good reason why a random spot between the twin four-lane stroads of Calgary Trail and Gateway should be designated for high density, but a site that's a five minute walk from McKernan/Belgravia Station should only be designated for low density.
 
 ![Scona district map, cropped](mckernan_belgravia_station_district_map.png){#fig-scona-district-map}
 
-Higher density permissions around major transit stations should be written into the district plans. It shouldn't matter whether rapid transit stations are within a primary corridor, secondary corridor, major node or none of them. This can happen either before the final draft district policy and plans are brought back to council in 2024 or in subsequent amendments by council. If you agree with me, please a few minutes to tell City Planning this in their [district policy survey](https://cityofedmonton.qualtrics.com/jfe/form/SV_cOtuG43o6YNnAea?EE).
+Higher density permissions around major transit stations should be written into the district plans. It shouldn't matter whether rapid transit stations are within a primary corridor, secondary corridor, major node or none of them. This can happen before the final draft district policy and plans are brought back to council in 2024 or in subsequent amendments by council. If you agree with me, please a few minutes to tell City Planning this in their [district policy survey](https://cityofedmonton.qualtrics.com/jfe/form/SV_cOtuG43o6YNnAea?EE) and as always, sign up for the [Grow Together Edmonton](https://www.gtyeg.ca/) mailing list to stay up-to-date on Edmonton housing news.
 
 *Are there any other LRT stations I should do?* *Did I get anything wrong? Let me know in the comments.*
