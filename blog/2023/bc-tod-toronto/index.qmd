@@ -125,7 +125,7 @@ mv <- mapView(
     radii_df %>% filter(radius == "200m"), 
     dashArray="5 10",
     zcol="STATUS",
-    layer.name="200m - 8 storeys",
+    layer.name="200m - 20 storeys",
     legend=FALSE,
     color=status_colours,
     label="200m - 20 storeys"
