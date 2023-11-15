@@ -16,7 +16,8 @@ listing:
     - image-alt
     - categories
   max-description-length: 250
-  feed: true
+  feed:
+    type: partial
 page-layout: full
 title-block-banner: false
 comments: false
