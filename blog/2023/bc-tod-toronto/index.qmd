@@ -11,7 +11,7 @@ execute:
   cache: true
   freeze: true
 link-external-newwindow: true
-link-external-icon: true
+link-external-icon: false
 ---
 
 ```{r}
@@ -26,6 +26,7 @@ library(mapview)
 crs <- "epsg:2952"
 zoning_area <- get_resource("d75fa1ed-cd04-4a0b-bb6d-2b928ffffa6e") %>%
   st_transform(crs) %>%
+  st_make_valid() %>%
   mutate(
     zone_desc = case_match(
       ZN_ZONE,
@@ -40,18 +41,30 @@ zoning_area <- get_resource("d75fa1ed-cd04-4a0b-bb6d-2b928ffffa6e") %>%
       .default="not found"
     )
   ) %>%
-  filter(zone_desc %in% c("Multiplex", "Residential Apartment", "Mixed Use"))  %>%
+  filter(zone_desc %in% c("Multiplex", "Residential Apartment", "Mixed Use")) %>%
   group_by(zone_desc) %>%
-  summarize(geometry=st_union(geometry))
+  summarize(geometry=st_union(geometry), .groups="keep")
+
 zoning_height <- get_resource("eec27e60-7c2d-4c46-8fa1-b64f441bcc39") %>%
   st_transform(crs) %>%
   st_filter(zoning_area) %>%
+  st_make_valid() %>%
   group_by(HT_LABEL) %>%
-  summarize(geometry=st_union(geometry)) %>%
+  summarize(geometry=st_union(geometry), .groups="keep") %>%
+  st_make_valid() %>%
+  mutate(geometry=rmapshaper::ms_simplify(geometry, keep=0.2)) %>%
+  ungroup() %>%
   mutate(storeys=HT_LABEL / 3)
+
 toronto_boundary <- read_sf("data/toronto-boundary-wgs84/") %>%
   st_transform(crs)
+
+zoning_area <-  zoning_area %>%
+  mutate(geometry=rmapshaper::ms_simplify(geometry, keep=0.2)) %>%
+  ungroup()
+
 transit_stations <- read_sf("data/GIS_Data_-_Future_Transit_Network_-_2023-05-12/") %>%
+  st_transform(crs) %>%
   st_filter(toronto_boundary) %>%
   filter(NAME != "Line 3: Scarborough RT") %>%
   group_by(LOCATION_N) %>%
@@ -65,7 +78,7 @@ BC's new transit-oriented development policy excited housing advocates across Ca
 
 Since I know many of my friends in Toronto have been waiting for their provincial government to release its policy for Toronto's Major Transit Station Areas (MTSAs), I made a map to show just how game-changing BC's policy would be if applied to Toronto. This is only including LRT, subway and GO train stations, so not even bus exchanges.
 
-It has layers for zoning, height (in approximate storeys) and each of the radii from BC's new policy. You can also toggle between a couple regular basemap and a a satellite image basemap. Data is not easily available for secondary plans so that is one gap of the map. Hope you enjoy and find it useful!
+It has layers for a summary of zoning, height (in approximate storeys) and each of the radii from BC's new policy. You can also toggle between a regular basemap and a a satellite image basemap. Data is not easily available for secondary plans so that is one gap of the map. Hope you enjoy and find it useful!
 
 ```{r}
 radii_df <- purrr::map(
@@ -96,7 +109,7 @@ mv <- mapView(
   layer.name="800m - 8 storeys",
   color=status_colours,
   label="800m - 8 storeys",
-  map.types=c("CartoDB.Positron", "Esri.WorldGrayCanvas", "Esri.WorldImagery")
+  map.types=c("CartoDB.Positron", "Esri.WorldImagery")
 ) +
   mapview(
     radii_df %>% filter(radius == "400m"), 
@@ -126,13 +139,13 @@ mv <- mapView(
   ) +
   mapview(
     zoning_area, 
-    alpha.regions=0.3, 
+    alpha.regions=0.25, 
     layer.name="Zoning",
     col.regions=c("Mixed Use"="red", "Multiplex"="yellow", "Residential Apartment"="orange")
   ) +
   mapview(
     zoning_height,
-    alpha.regions=0.5,
+    alpha.regions=0.4,
     layer.name="Height (storeys)",
     zcol="storeys",
     label=paste0("~", round(zoning_height$storeys, digits=1), " ", "storeys"),
