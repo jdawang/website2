@@ -1,0 +1,144 @@
+---
+title: "BC's new transit-oriented development policy applied to Toronto"
+date: "2023-11-15"
+categories:
+  - map
+  - data
+  - housing
+  - transit
+  - toronto
+execute: 
+  cache: true
+  freeze: true
+link-external-newwindow: true
+link-external-icon: true
+---
+
+```{r}
+#| output: false
+
+library(opendatatoronto)
+library(dplyr)
+library(tidytransit)
+library(sf)
+library(mapview)
+
+crs <- "epsg:2952"
+zoning_area <- get_resource("d75fa1ed-cd04-4a0b-bb6d-2b928ffffa6e") %>%
+  st_transform(crs) %>%
+  mutate(
+    zone_desc = case_match(
+      ZN_ZONE,
+      c("R", "RD", "RS", "RT", "RM") ~ "Multiplex",
+      c("RA", "RAC") ~ "Residential Apartment",
+      c("O", "ON", "OR", "OG", "OM", "OC") ~ "Open Space",
+      "UT" ~ "Utility",
+      "CL" ~ "Commercial",
+      c("CR", "CRE") ~ "Mixed Use",
+      c("EL", "E", "EH", "EO") ~ "Employment",
+      c("I", "IH", "IE", "IS", "IPW") ~ "Institutional",
+      .default="not found"
+    )
+  ) %>%
+  filter(zone_desc %in% c("Multiplex", "Residential Apartment", "Mixed Use"))  %>%
+  group_by(zone_desc) %>%
+  summarize(geometry=st_union(geometry))
+zoning_height <- get_resource("eec27e60-7c2d-4c46-8fa1-b64f441bcc39") %>%
+  st_transform(crs) %>%
+  st_filter(zoning_area) %>%
+  group_by(HT_LABEL) %>%
+  summarize(geometry=st_union(geometry)) %>%
+  mutate(storeys=HT_LABEL / 3)
+toronto_boundary <- read_sf("data/toronto-boundary-wgs84/") %>%
+  st_transform(crs)
+transit_stations <- read_sf("data/GIS_Data_-_Future_Transit_Network_-_2023-05-12/") %>%
+  st_filter(toronto_boundary) %>%
+  filter(NAME != "Line 3: Scarborough RT") %>%
+  group_by(LOCATION_N) %>%
+  filter(row_number() == 1) %>%
+  ungroup()
+```
+
+BC's new transit-oriented development policy excited housing advocates across Canada. This legislation sets a new bar for as-of-right density permissions around rapid transit and even "bus exchanges".
+
+![](bc_tod_chart.png)
+
+Since I know many of my friends in Toronto have been waiting for their provincial government to release its policy for Toronto's Major Transit Station Areas (MTSAs), I made a map to show just how game-changing BC's policy would be if applied to Toronto. This is only including LRT, subway and GO train stations, so not even bus exchanges.
+
+It has layers for zoning, height (in approximate storeys) and each of the radii from BC's new policy. You can also toggle between a couple regular basemap and a a satellite image basemap. Data is not easily available for secondary plans so that is one gap of the map. Hope you enjoy and find it useful!
+
+```{r}
+radii_df <- purrr::map(
+  c(
+    units::set_units(800, "m"), 
+    units::set_units(400, "m"), 
+    units::set_units(200, "m")
+  ),
+  function(d) {
+    transit_stations %>% 
+      st_buffer(d) %>% 
+      mutate(radius=paste0(as.numeric(d), "m")) %>%
+      st_boundary()
+  }
+) %>%
+  bind_rows()
+```
+
+```{r}
+#| column: screen
+#| warning: false
+status_colours <- c("Advancing"="gray60", "Existing"="black", "In Delivery"="grey20", "Proposed"="grey40")
+
+mv <- mapView(
+  radii_df %>% filter(radius == "800m"),
+  zcol="STATUS",
+  legend=FALSE,
+  layer.name="800m - 8 storeys",
+  color=status_colours,
+  label="800m - 8 storeys",
+  map.types=c("CartoDB.Positron", "Esri.WorldGrayCanvas", "Esri.WorldImagery")
+) +
+  mapview(
+    radii_df %>% filter(radius == "400m"), 
+    dashArray= "20 10",
+    zcol="STATUS",
+    legend=FALSE,
+    layer.name="400m - 12 storeys",
+    color=status_colours,
+    label="400m - 12 storeys"
+  ) +
+  mapview(
+    radii_df %>% filter(radius == "200m"), 
+    dashArray="5 10",
+    zcol="STATUS",
+    layer.name="200m - 8 storeys",
+    legend=FALSE,
+    color=status_colours,
+    label="200m - 20 storeys"
+  ) +
+  mapview(
+    transit_stations, 
+    cex=3,
+    zcol="STATUS",
+    col.regions=status_colours,
+    label=transit_stations$LOCATION_N,
+    layer.name="Transit stations"
+  ) +
+  mapview(
+    zoning_area, 
+    alpha.regions=0.3, 
+    layer.name="Zoning",
+    col.regions=c("Mixed Use"="red", "Multiplex"="yellow", "Residential Apartment"="orange")
+  ) +
+  mapview(
+    zoning_height,
+    alpha.regions=0.5,
+    layer.name="Height (storeys)",
+    zcol="storeys",
+    label=paste0("~", round(zoning_height$storeys, digits=1), " ", "storeys"),
+    hide=TRUE,
+    col.regions=viridis::inferno(100, begin=0.10, end=0.9)
+  )
+removeMapJunk(mv@map, c("homeButton", "easyButton", "drawToolbar")) %>%
+  leaflet.extras::addFullscreenControl()
+```
