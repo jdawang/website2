@@ -674,7 +674,7 @@ station_area_plot(
 
 To sum up:
 
--   Belgravia/McKernan Station area has not seen much growth over the past twenty years, especially compared to the rest of Edmonton.
+-   McKernan/Belgravia Station area has not seen much growth over the past twenty years, especially compared to the rest of Edmonton.
 
 -   The first major driver of growth seems to be demolition and replacement of low-rise apartments with slightly higher density. This means that there was more displacement through demolition than if the surrounding detached homes were replaced with apartments.
 
