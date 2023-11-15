@@ -12,6 +12,7 @@ execute:
   freeze: true
 link-external-newwindow: true
 link-external-icon: false
+image: "bc_tod_toronto_thumbnail.png"
 ---
 
 ```{r}
@@ -155,3 +156,10 @@ mv <- mapView(
 removeMapJunk(mv@map, c("homeButton", "easyButton", "drawToolbar")) %>%
   leaflet.extras::addFullscreenControl()
 ```
+
+::: column-screen
+```{r}
+#| output: asis
+#cat(readr::read_file("map.html"))
+```
+:::
