@@ -222,7 +222,7 @@ However, even within the nodes and corridors approach, the city is missing an op
 
 ![Policy framework for TOD in upcoming BC legislation](bc_tod_chart.png){#fig-bc-tod}
 
-As an example, let's take a closer look at the least used station on the entire Edmonton LRT network, McKernan/Belgravia, built recently in 2009. But first, a primer on corridors in district planning. If you're already familiar with district planning, skip straight to @sec-growth-or-not for a look at population and housing growth over the past 20 years using census data. Lastly, @sec-no-tod-planned-here maps out what district planning actually means around McKernan/Belgravia station and compares it to the new BC legislation.
+As an example, let's take a closer look at McKernan/Belgravia Station, built recently in 2009 and the least-used station on the entire LRT network. But first, a primer on corridors in district planning. If you're already familiar with district planning, skip straight to @sec-growth-or-not for a look at population and housing growth over the past 20 years using census data. Lastly, @sec-no-tod-planned-here maps out what district planning actually means around McKernan/Belgravia station and compares it to the new BC legislation.
 
 ## Tl;dr
 
@@ -870,7 +870,9 @@ station_area_plot(
 
 ## Conclusion and how to move forward
 
-The Scona district plan is certainly an improvement on the area redevelopment plan, allowing higher densities along 76 Ave and 114 St. However, we need to fully leverage every one of the few rapid transit stations in Edmonton to avoid a spreading Canadian housing crisis, dial back sprawl and achieve the city's target of 50% infill development. BC's government has set a new bar in Canada for transit-oriented development and that's where we should start. There is no good reason why a random spot between the twin four-lane stroads of Calgary Trail and Gateway should be designated for high density, but a site that's a five minute walk from McKernan/Belgravia Station should only be designated for low density.
+The Scona district plan is certainly an improvement on the area redevelopment plan, allowing higher densities along 76 Ave and 114 St. However, we need to fully leverage every one of the few rapid transit stations in Edmonton to avoid a spreading Canadian housing crisis, dial back sprawl and achieve the city's target of 50% infill development. This especially applies to the least used station on the LRT network, one that is also a short walk away from the University of Alberta.
+
+BC's government has set a new bar in Canada for transit-oriented development and that's where we should start. There is no good reason why a random spot between the twin four-lane stroads of Calgary Trail and Gateway should be designated for high density, but a site that's a five minute walk from McKernan/Belgravia Station should only be designated for low density.
 
 ![Scona district map, cropped](mckernan_belgravia_station_district_map.png){#fig-scona-district-map}
 
