@@ -1,6 +1,6 @@
 ---
 title: "McKernan/Belgravia Station"
-date: "2023-11-15"
+date: "2023-11-20"
 categories:
   - map
   - data
@@ -872,10 +872,10 @@ station_area_plot(
 
 The Scona district plan is certainly an improvement on the area redevelopment plan, allowing higher densities along 76 Ave and 114 St. However, we need to fully leverage every one of the few rapid transit stations in Edmonton to avoid a spreading Canadian housing crisis, dial back sprawl and achieve the city's target of 50% infill development. This especially applies to the least used station on the LRT network, one that is also a short walk away from the University of Alberta.
 
-BC's government has set a new bar in Canada for transit-oriented development and that's where we should start. There is no good reason why a random spot between the twin four-lane stroads of Calgary Trail and Gateway should be designated for high density, but a site that's a five minute walk from McKernan/Belgravia Station should only be designated for low density.
+BC's government has set a new bar in Canada for transit-oriented development and that's where we should start. There is no good reason why a random spot between the twin four-lane stroads of Calgary Trail and Gateway should be designated for high density, but a site that's a five minute walk from McKernan/Belgravia Station should only be designated for low density. This is essentially relegating high-density apartment dwellers, who tend to be less wealthy and more reliant on transit, to live in a truly horrendous area with high levels of air pollution, noise and traffic, while throttling how many people are allowed to enjoy a desirable neighbourhood that's well-served by rapid transit. I'm not saying that Calgary Trail/Gateway should not have high density permissions, but people who can only afford to live in high-density apartments should have the choice to have good access to the LRT. In this case, it means that we need to allow higher density housing throughout the McKernan/Belgravia Station area than what is currently planned.
 
 ![Scona district map, cropped](mckernan_belgravia_station_district_map.png){#fig-scona-district-map}
 
 Higher density permissions around major transit stations should be written into the district plans. It shouldn't matter whether rapid transit stations are within a primary corridor, secondary corridor, major node or none of them. This can happen before the final draft district policy and plans are brought back to council in 2024 or in subsequent amendments by council. If you agree with me, please a few minutes to tell City Planning this in their [district policy survey](https://cityofedmonton.qualtrics.com/jfe/form/SV_cOtuG43o6YNnAea?EE) and as always, sign up for the [Grow Together Edmonton](https://www.gtyeg.ca/) mailing list to stay up-to-date on Edmonton housing news.
 
-*Are there any other LRT stations I should do?* *Did I get anything wrong? Let me know in the comments.*
+*Are there any other LRT stations I should do? Did I get anything wrong? Let me know in the comments.*
