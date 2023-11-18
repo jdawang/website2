@@ -13,6 +13,7 @@ execute:
   freeze: true
 link-external-newwindow: true
 link-external-icon: true
+description: "Where district planning doesn't go far enough: a closer look at the area around the least-used Edmonton LRT station."
 ---
 
 ```{r libraries}
