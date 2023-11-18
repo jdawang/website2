@@ -520,7 +520,7 @@ station_area_plot(
 :::
 :::
 
-Since we have data from multiple censuses, we can also track change census-over-census, every five years from 2001 in @fig-census-over-census-bar. McKernan/Belgravia trailed the rest of Edmonton in every census period. The station area really only grew in dwellings and population substantially in 2011-2016.
+Since we have data from multiple censuses, we can also track change census-over-census, every five years from 2001 in @fig-census-over-census-bar. McKernan/Belgravia trailed the *Rest of Edmonton* in every census period. The station area really only grew in dwellings and population substantially in 2011-2016.
 
 ```{r}
 #| label: fig-census-over-census-bar
