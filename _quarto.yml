@@ -17,6 +17,8 @@ website:
   image: files/profile.png
   site-url: "https://www.jacobdawang.com"
   repo-url: "https://github.com/jdawang/website2"
+  repo-actions: source
+  repo-branch: main
   description: Jacob Dawang's personal website
   favicon: files/favicon.ico
   twitter-card:
@@ -28,7 +30,6 @@ website:
     left:
       - about.qmd
       - blog.qmd
-      - projects.qmd
     right: 
       - icon: rss
         href: blog.xml
@@ -41,9 +42,8 @@ website:
 format:
   html:
     theme:
-      light: cosmo
-      dark: solar
-    css: styles.css
+      light: [cosmo, custom_styles.scss]
+      dark: [cosmo, custom_styles_dark.scss]
     toc: false
 
 editor: visual
