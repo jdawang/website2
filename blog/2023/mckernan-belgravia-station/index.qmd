@@ -88,7 +88,9 @@ lrt_stops <- filter_stops(
 
 belmac_station_area <- lrt_stops %>%
   filter(stop_name_short == "McKernan Belgravia") %>%
-  st_buffer(units::set_units(800, "m"))
+  st_transform(4326) %>%
+  st_buffer(units::set_units(800, "m")) %>%
+  st_transform(crs)
 
 belmac_nodes_corridors <- read_sf("data/belmac_nodes_corridors.geojson") %>% 
   st_transform(st_crs(zoning)) %>%
@@ -128,7 +130,9 @@ area_type_colours <- c(
 outside_area <- function(.data) {
   st_bbox(.data) %>%
     st_as_sfc() %>%
+    st_transform(4326) %>%
     st_buffer(units::set_units(4, "m")) %>% 
+    st_transform(st_crs(.data)) %>%
     st_difference(.data)
 }
 station_area_plot <- function(
@@ -145,7 +149,15 @@ station_area_plot <- function(
     remove_outside=TRUE,
     zoom=16
 ) {
-  station_areas <- purrr::map(radius, function(x) lrt_stop_data %>% st_buffer(x)) %>% 
+  station_areas <- purrr::map(
+    radius, 
+    function(x) {
+      lrt_stop_data %>% 
+        st_transform(4326) %>%
+        st_buffer(x) %>%
+        st_transform(st_crs(lrt_stop_data))
+    }
+  ) %>% 
     magrittr::set_names(
       glue::glue("{as.character(radius)}{units::deparse_unit(radius)}") %>%
         factor()
@@ -249,6 +261,8 @@ Primary corridors will support:
 
 Secondary corridors will support low-rise (up to 4 storeys) throughout and mid-rise along the main streets. Transition to lower density will be supported along the edges of secondary corridors. There are no provisions for additional density within secondary corridors near rapid transit stations or around rapid transit stations that are not within a node or corridor.
 
+Major nodes will support mid-rise throughout the area, high-rise (up to 21 storeys) along main roads and tall high rise (21+) where context allows for transition.
+
 ## Two decades of little growth {#sec-growth-or-not}
 
 [This section is inspired and much of the code is copied from Jens von Bergmann's [blog post](https://doodles.mountainmath.ca/blog/2022/05/21/nanaimo-station/) on Nanaimo Station in Vancouver.]{.aside} Let's take a look at how the area around McKernan/Belgravia Station area has grown over the past 20 years. To start off, I've defined the station area as extending 800m from the platform at 76 Ave and 114 St. This aligns with the largest radius of BC's new TOD policy and is generally a 10-15 minute walk away.
@@ -293,7 +307,7 @@ station_area_plot(
   lrt_stops %>% filter(stop_name_short == "McKernan Belgravia"),
   aes(fill=ai/a), 
   alpha=0.6,
-  zoom=15,
+  zoom=14,
   remove_outside=FALSE,
   lrt_line=FALSE,
   lrt_stop=TRUE,
@@ -320,7 +334,7 @@ station_area_plot(
   lrt_stops %>% filter(stop_name_short == "McKernan Belgravia"),
   aes(fill=ai/a), 
   alpha=0.6,
-  zoom=16,
+  zoom=15,
   remove_outside=FALSE,
   lrt_line=FALSE,
   lrt_stop=TRUE,
@@ -412,7 +426,7 @@ station_area_plot(
   lrt_stop_size=3,
   remove_outside=FALSE,
   alpha=0.7,
-  zoom=16
+  zoom=15
 ) +
   scale_fill_fermenter(
     labels=scales::label_comma(style_positive="plus"),
@@ -438,7 +452,7 @@ station_area_plot(
   lrt_stop_size=3,
   remove_outside=FALSE,
   alpha=0.7,
-  zoom=16
+  zoom=15
 ) +
   scale_fill_fermenter(
     labels=scales::label_comma(style_positive="plus"),
@@ -474,7 +488,7 @@ station_area_plot(
   lrt_stop_size=3,
   remove_outside=FALSE,
   alpha=0.7,
-  zoom=16
+  zoom=15
 ) +
   scale_fill_fermenter(
     labels=scales::label_percent(style_positive="plus"),
@@ -500,7 +514,7 @@ station_area_plot(
   lrt_stop_size=3,
   remove_outside=FALSE,
   alpha=0.7,
-  zoom=16
+  zoom=15
 ) +
   scale_fill_fermenter(
     labels=scales::label_percent(style_positive="plus"),
@@ -742,7 +756,7 @@ potential_residential_area_prop <- as.numeric(st_area(st_union(potential_residen
 
 ```
 
-But, that doesn't tell the whole story, as some plots are zoned for parks, fire halls and other jurisdictions, where housing is unlikely to be built, even through a rezoning. @Fig-nodes-corridors-residential shows the coverage of nodes and corridors when we exclude these zones. The major node to the north at the University of Alberta no longer plays any role in the McKernan/Belgravia Station area. Using this map, only `r scales::label_percent(accuracy=1)(potential_residential_area_prop)` of the station area is covered by the secondary corridors that will support up to 8 storeys.
+But, that doesn't tell the whole story, as some plots are zoned for parks, fire halls and other jurisdictions, where housing is unlikely to be built, even through a rezoning. @Fig-nodes-corridors-residential shows the coverage of nodes and corridors when we exclude these zones. The major node to the north at the University of Alberta plays a much smaller rolein the McKernan/Belgravia Station area. Using this map, only `r scales::label_percent(accuracy=1)(potential_residential_area_prop)` of the station area is covered by the secondary corridors and major node.
 
 ```{r}
 #| label: fig-nodes-corridors-residential
@@ -791,7 +805,7 @@ nodes_corridors_buildable_prop <- as.numeric(
 )
 ```
 
-Why stop there? Through DC zoning, local knowledge and some streetview, I identified some sites within the secondary corridor that are either existing, under construction or planned low to mid-rise apartments, shown in @fig-nodes-corridors-planned. I have also excluded the wide 114 St/LRT right-of-way. While arguably one of the older low-rise apartments on the site furthest east along 76 Ave could see an increase in permissions and redevelop, the rest of the sites identified are relatively new and are unlikely to benefit from the secondary corridor permissions. When we remove these sites and the right-of-way, only `r scales::label_percent(accuracy=1)(nodes_corridors_buildable_prop)` of the station area remains covered by secondary corridors that will support up to 8 storeys.
+Why stop there? Through DC zoning, local knowledge and some streetview, I identified some sites within the secondary corridor that are either existing, under construction or planned low to mid-rise apartments, shown in @fig-nodes-corridors-planned. I have also excluded the wide 114 St/LRT right-of-way. While arguably one of the older low-rise apartments on the site furthest east along 76 Ave could see an increase in permissions and redevelop, the rest of the sites identified are relatively new and are unlikely to benefit from the secondary corridor permissions. When we remove these sites and the right-of-way, only `r scales::label_percent(accuracy=1)(nodes_corridors_buildable_prop)` of the station area remains covered by secondary corridors and the major node.
 
 ```{r}
 #| label: fig-nodes-corridors-planned
