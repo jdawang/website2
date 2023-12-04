@@ -18,7 +18,7 @@ description: "As Edmonton's Urban Planning Committee discusses the interim Distr
 
 Edmonton's Urban Planning Committee will discuss an interim report on District Planning on December 5. District planning will define the borders of and development policies applied to "nodes and corridors" where site-specific rezonings for higher density are likely to be supported. As I've said before, I generally disagree with the node and corridor approach, but that is the scope of the initiative.
 
-As I argued in my [post on McKernan/Belgravia Station](/blog/2023/mckernan-belgravia-station/index.qmd), I believe that Edmonton is missing out on an opportunity to encourage transit-oriented development (TOD) around some LRT stations in secondary corridors. With Avonmore Stop, we have an LRT station that is not even in a secondary corridor or node or anything that would encourage higher density beyond the 8 units and 10.5m allowed in the base RS zone. We can do better, especially when we use BC's new TOD legislation as inspiration.
+As I wrote in my [post on McKernan/Belgravia Station](/blog/2023/mckernan-belgravia-station/index.qmd), I believe that Edmonton is missing out on an opportunity to encourage transit-oriented development (TOD) around some LRT stations in secondary corridors. With Avonmore Stop, we have an LRT station that is not even in a secondary corridor or node or anything that would encourage higher density beyond the 8 units and 10.5m allowed in the base RS zone. We can do better, especially when we use BC's new TOD legislation as inspiration.
 
 ![Policy framework for TOD in recently passed BC legislation](bc_tod_chart.png){#fig-bc-tod-chart}
 
