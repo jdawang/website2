@@ -9,6 +9,16 @@
 *_cache/
 /env/
 /_site/
+blog/**/data/
+blog/**/maptiles/
+blog/**/renv/library/
+blog/**/renv/local/
+blog/**/renv/cellar/
+blog/**/renv/lock/
+blog/**/renv/python/
+blog/**/renv/sandbox/
+blog/**/renv/staging/
+
 
 
 /.luarc.json
