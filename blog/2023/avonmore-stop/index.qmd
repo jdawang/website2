@@ -1,0 +1,760 @@
+---
+title: "Avonmore Stop"
+date: "2023-12-04"
+categories:
+  - map
+  - data
+  - housing
+  - district planning
+  - transit
+  - edmonton
+execute: 
+  cache: true
+  freeze: true
+link-external-newwindow: true
+link-external-icon: true
+description: "As Edmonton's Urban Planning Committee discusses the interim District Planning report, here's a closer look at what's in store for the area around Avonmore Stop on the Valley Line."
+---
+
+Edmonton's Urban Planning Committee will discuss an interim report on District Planning on December 5. District planning will define the borders of and development policies applied to "nodes and corridors" where site-specific rezonings for higher density are likely to be supported. As I've said before, I generally disagree with the node and corridor approach, but that is the scope of the initiative.
+
+As I wrote in my [post on McKernan/Belgravia Station](/blog/2023/mckernan-belgravia-station/index.qmd), I believe that Edmonton is missing out on an opportunity to encourage transit-oriented development (TOD) around some LRT stations in secondary corridors. With Avonmore Stop, we have an LRT station that is not even in a secondary corridor or node or anything that would encourage higher density beyond the 8 units and 10.5m allowed in the base RS zone. We can do better, especially when we use BC's new TOD legislation as inspiration.
+
+![Policy framework for TOD in recently passed BC legislation](bc_tod_chart.png){#fig-bc-tod-chart}
+
+In this post, we'll take a closer look at Avonmore Stop, opened just a month ago on the new Valley Line. I've copy-pasted the relevant primer on district planning in @sec-corridors-primer, crunched the numbers on growth over the past 20 years in @sec-growth-or-not, and shown how little additional density is planned in @sec-no-tod-planned-here.
+
+```{r libraries}
+# renv::use(lockfile="renv.lock")
+library(sf)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gganimate)
+library(stringr)
+library(tidyterra)
+library(maptiles)
+library(tidytransit)
+library(tongfen)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path=Sys.getenv("TONGFEN_CACHE_PATH")
+)
+```
+
+```{r data-prep}
+crs <- "epsg:3857"
+zoning <- read_sf("data/20001 Zoning Bylaw Geographic Data.geojson") %>%
+  mutate(
+    new_zone=case_match(
+      new_zone,
+      c("A", "PS", "PSN", "PU") ~ "Recreational/Civic",
+      "MU" ~ "MU - Low-rise mixed use", 
+      c("DC1", "DC2") ~ "DC - Direct control",
+      "RM" ~ "RM - Low-rise or shorter mid-rise apartments",
+      "RS" ~ "RS - Low rise up to 8 units",
+      "RSM" ~ "RSM - Low to mid rise transition zone",
+      c("CG", "CN") ~ "Commercial",
+      c("BE", "IM") ~ "Industrial",
+      .default=new_zone
+    )
+  ) %>%
+  st_make_valid() %>%
+  st_transform(crs) %>%
+  group_by(new_zone) %>%
+  summarize(geometry=st_union(geometry)) %>%
+  ungroup() %>%
+  st_make_valid()
+
+
+ets_gtfs <- gtfs_as_sf(read_gtfs("data/ca-alberta-edmonton-transit-system-gtfs-714.zip"))
+lrt_routes <- get_route_geometry(ets_gtfs, route_ids=c("021R", "022R", "023R")) %>%
+  inner_join(ets_gtfs$routes %>% select(route_id, route_short_name, route_color), by="route_id") %>%
+  mutate(route_color=str_c("#", route_color)) %>%
+  st_transform(crs)
+
+lrt_stops <- filter_stops(
+  ets_gtfs,
+  route_ids=c("021R", "022R", "023R"),
+  service_ids=filter(ets_gtfs$calendar, date=="2023-11-09") %>% pull(service_id)
+) %>%
+  mutate(
+    stop_name=case_match(
+      stop_name, 
+      "Bay Enterprise Square  Station" ~ "Bay Enterprise Square Station", 
+      "Churchill Stop" ~ "Churchill Station",
+      .default=stop_name
+    )
+  ) %>%
+  filter(!(stop_name %in% c("Metro Line JTTl Track", "DL MacDonald Platform"))) %>%
+  st_transform(crs) %>%
+  group_by(stop_name) %>%
+  summarize(geometry=st_union(geometry)) %>%
+  mutate(geometry=st_centroid(geometry), stop_name_short=str_remove(stop_name, " (Stop|Station)"))
+
+avonmore_station_area <- lrt_stops %>%
+  filter(stop_name_short == "Avonmore") %>%
+  st_transform(4326) %>%
+  st_buffer(units::set_units(800, "m")) %>%
+  st_transform(crs)
+
+avonmore_nodes_corridors <- read_sf("data/avonmore_nodes_corridors.geojson") %>% 
+  st_transform(st_crs(zoning)) %>%
+  st_intersection(avonmore_station_area) %>%
+  st_make_valid() %>%
+  mutate(area_type=str_to_sentence(area_type))
+
+zone_colours <- c(
+  "RS - Low rise up to 8 units"="#FFE302",
+  "RSM - Low to mid rise transition zone"="#FDC828",
+  "RM - Low-rise or shorter mid-rise apartments"="#FAA755",
+  "High-rise apartments"="#FF920A",
+  "Commercial"="brown",
+  "MU - Low-rise mixed use"="#FF00FF",
+  "MU - High-rise mixed use"="#FF0000",
+  "DC - Direct control"="#40E0D0", 
+  "Recreational/Civic"="#008800",
+  "Industrial"="#666666"
+)
+
+area_type_colours <- c(
+  "Centre city"="#a56465",
+  "Major node"="#fd8e8d",
+  "District node"="#fead64",
+  "Primary corridor"="#f2cacb",
+  "Secondary corridor"="#f5deae",
+  "Existing low-rise apartments"="#4477aa",
+  "DC - Direct control"="#40E0D0",
+  "Existing mid-rise apartments"="#aa3377",
+  "Under construction mid-rise"="#228833"
+  )
+```
+
+```{r plot-functions}
+outside_area <- function(.data) {
+  st_bbox(.data) %>%
+    st_as_sfc() %>%
+    st_transform(4326) %>%
+    st_buffer(units::set_units(4, "m")) %>% 
+    st_transform(st_crs(.data)) %>%
+    st_difference(.data)
+}
+station_area_plot <- function(
+    .data,
+    lrt_stop_data,
+    mapping,
+    radius=units::set_units(800, "m"),
+    radius_linetypes="solid",
+    fill_values=NULL,
+    alpha=0.8,
+    lrt_line=TRUE,
+    lrt_stop=TRUE,
+    lrt_stop_size=4,
+    remove_outside=TRUE,
+    zoom=15
+) {
+  station_areas <- purrr::map(
+    radius, 
+    function(x) {
+      lrt_stop_data %>% 
+        st_transform(4326) %>%
+        st_buffer(x) %>%
+        st_transform(st_crs(lrt_stop_data))
+    }
+  ) %>% 
+    magrittr::set_names(
+      glue::glue("{as.character(radius)}{units::deparse_unit(radius)}") %>%
+        factor()
+    ) %>%
+    bind_rows(.id="Radius")
+  
+  if (!is.null(fill_values)) scale <- scale_fill_manual(values=fill_values)
+  else scale <- NULL
+  
+  if (lrt_line) {
+    lrt_layer <- geom_sf(
+      data=lrt_routes %>% st_intersection(st_union(station_areas)), 
+      mapping=aes(colour=route_short_name), 
+      linewidth=1.2
+    )
+    lrt_colours <- pull(lrt_routes, route_color)
+    names(lrt_colours) <- pull(lrt_routes, route_short_name)
+    lrt_colour_scale <- scale_colour_manual(values=lrt_colours, labels=NULL, name=NULL, guide=NULL)
+    
+  }
+  else {
+    lrt_layer <- NULL
+    lrt_colour_scale <- NULL
+  }
+  
+  if (lrt_stop) {
+    lrt_stop_layer <- geom_sf(
+      data=lrt_stop_data %>% st_intersection(st_union(station_areas)), size=lrt_stop_size
+    )
+  }
+  else lrt_stop_layer <- NULL
+  
+  if (remove_outside) {
+    plot_data <- .data %>% st_intersection(st_union(station_areas)) %>% st_make_valid()
+    remove_outside_layer <- geom_sf(data=outside_area(st_union(station_areas)), fill="white", colour=NA)
+  }
+  else {
+    remove_outside_layer <- NULL
+    plot_data <- .data
+  }
+  
+  tiles <- get_tiles(
+    st_union(station_areas), 
+    provider="Stadia.Stamen.TonerLite", 
+    zoom=zoom, 
+    apikey=Sys.getenv("STADIAMAPS_API_KEY"), 
+    cachedir="maptiles",
+    crop=TRUE
+  )
+  
+  ggplot() +
+    geom_spatraster_rgb(data=tiles, interpolate=TRUE, maxcell=1e7) + 
+    remove_outside_layer +
+    geom_sf(data=plot_data, mapping=mapping, alpha=alpha) + 
+    scale +
+    geom_sf(
+      data=st_boundary(station_areas), 
+      mapping=aes(linetype=Radius), 
+      fill="transparent", 
+      linewidth=1.1
+    ) + 
+    scale_linetype_manual(values=radius_linetypes) +
+    lrt_layer + 
+    lrt_colour_scale +
+    lrt_stop_layer +
+    theme_void() +
+    labs(caption="Map tiles © Stamen Design, data City of Edmonton, viz Jacob Dawang") +
+    coord_sf(expand=FALSE)
+}
+```
+
+## Nodes and corridors primer {#sec-corridors-primer}
+
+The City Plan and [draft district policy](https://www.edmonton.ca/sites/default/files/public-files/DistrictPolicy-August-2023.pdf) define secondary corridors as:
+
+> areas along prominent residential and commercial streets that serve as a local destination for surrounding Neighbourhoods. They connect to Nodes, feature diverse travel modes and may evolve as more commercial or residential over time.
+
+Secondary corridors will support low-rise (up to 4 storeys) throughout and mid-rise along the main streets. Transition to lower density will be supported along the edges of secondary corridors. There are no provisions for additional density within secondary corridors near rapid transit stations or around rapid transit stations that are not within a node or corridor.
+
+Local nodes:
+
+> serve Neighbourhoods through a mix of commercial uses, civic spaces and centres, cultural facilities, places of worship and schools. Local Nodes function as focal points for housing, business, services and gathering for one or a small set of Neighbourhoods.
+
+Local nodes will support low-rise development throughout and mid-rise along main streets where "site size and context allow for appropriate transition to surrounding development."
+
+## Stagnation {#sec-growth-or-not}
+
+[This section is inspired and much of the code is copied from Jens von Bergmann's [blog post](https://doodles.mountainmath.ca/blog/2022/05/21/nanaimo-station/) on Nanaimo Station in Vancouver.]{.aside} Let's take a look at how the area around Avonmore Stop area has grown -- or not -- over the past 20 years. To start off, I've defined the station area as extending 800m from the platforms on 83 St at 73 Ave. This aligns with the largest radius of BC's new TOD policy and is generally a 10-15 minute walk away.
+
+```{r census-data}
+census_years <- seq(2001, 2021, 5)
+meta <- purrr::map(
+  census_years, 
+  function(y) meta_for_additive_variables(paste0("CA",substr(y,3,4)), c("Population","Dwellings"))
+) %>% 
+  bind_rows()
+census_data <- get_tongfen_ca_census(
+  regions=list(CSD="4811061"),  # Edmonton CSD
+  meta=meta,
+  level="DB",
+  base_geo="CA21",
+  crs=crs
+)
+
+```
+
+Census data has what we need, but census dissemination blocks (DBs) don't perfectly line up with the 800m radius and their borders change from census to census. First, I harmonized the 2001-2021 DBs to a common geography using the [TongFen library](https://mountainmath.github.io/tongfen/). Then, I selected the DBs that are more than 50% within the station area, shown in @fig-db-overlap-any.
+
+```{r}
+#| label: fig-db-overlap-any
+#| fig-cap: Harmonized dissemination block overlap with Avonmore Stop area
+
+census_avonmore_overlap_any <- census_data %>%
+  st_filter(avonmore_station_area) %>%
+  mutate(a=st_area(.) %>% as.numeric) %>%
+  mutate(ai=st_area(st_intersection(.,avonmore_station_area)) %>% as.numeric)
+census_avonmore <- census_avonmore_overlap_any %>%
+  filter(ai / a > 0.5) %>%
+  mutate(
+    population_growth=Population_CA21 - Population_CA01,
+    population_growth_pct=Population_CA21 / Population_CA01 - 1, 
+    dwellings_growth=Dwellings_CA21 - Dwellings_CA01,
+    dwellings_growth_pct=Dwellings_CA21 / Dwellings_CA01 - 1
+  )
+
+avonmore_stop_point <- lrt_stops %>% filter(stop_name_short == "Avonmore")
+station_area_plot(
+  census_avonmore_overlap_any,
+  avonmore_stop_point,
+  aes(fill=ai/a), 
+  alpha=0.6,
+  zoom=15,
+  remove_outside=FALSE,
+  lrt_line=FALSE,
+  lrt_stop=TRUE,
+  lrt_stop_size=3
+) +
+  scale_fill_viridis_c(option="magma", labels=scales::percent) +
+  labs(
+    title="Harmonized Dissemination Blocks near Avonmore Stop",
+    fill="Share of area\nwithin 800m\nstation radius",
+    caption="Data StatCan Census 2001-2021, Map tiles © Stamen Design"
+  ) +
+  guides(linetype="none") +
+  theme_void()
+```
+
+@fig-db-included shows only the DBs considered to be within Avonmore Stop area by the simple 50% inclusion rule. These DBs form the "census station area" that will be used from here on.
+
+```{r}
+#| label: fig-db-included
+#| fig-cap: Harmonized dissemination blocks included in Avonmore Stop area
+
+station_area_plot(
+  census_avonmore,
+  avonmore_stop_point,
+  aes(fill=ai/a), 
+  alpha=0.6,
+  zoom=16,
+  remove_outside=FALSE,
+  lrt_line=FALSE,
+  lrt_stop=TRUE,
+  lrt_stop_size=3
+) +
+  scale_fill_viridis_c(option="magma", labels=scales::percent) +
+  labs(
+    title="Harmonized Dissemination Blocks near Avonmore Stop",
+    fill="Share of area\nwithin 800m\nstation radius",
+    caption="Data StatCan Census 2001-2021, Map tiles © Stamen Design"
+  ) +
+  guides(linetype="none") +
+  theme_void()
+```
+
+```{r}
+census_except_avonmore <- census_data %>%
+  filter(!(TongfenID %in% pull(census_avonmore, TongfenID)))
+```
+
+Now that the census station area is well-defined, we can divide Edmonton into the Avonmore Stop area and the *Rest of Edmonton*. As shown in @fig-overall-growth-bar, neither dwellings nor population has grown significantly over the past two decades.
+
+```{r}
+#| label: fig-overall-growth-bar
+#| fig-cap: Population and dwelling growth in the Avonmore Stop area and rest of Edmonton, 2001-2021
+bar_colours <- c("Avonmore Stop"="#994F00", "Rest of Edmonton"="#006CD1")
+bind_rows(
+  list(
+    `Avonmore Stop`=census_avonmore,
+    `Rest of Edmonton`=census_except_avonmore
+  ),
+  .id="Area"
+) %>%
+  group_by(Area) %>%
+  summarize(
+    Population=sum(Population_CA21) / sum(Population_CA01) - 1, 
+    Dwellings=sum(Dwellings_CA21) / sum(Dwellings_CA01) -1,
+    .groups="drop"
+  ) %>%
+  st_drop_geometry() %>%
+  pivot_longer(
+    c(Population, Dwellings),
+    names_to="Metric",
+    values_to="value"
+  ) %>%
+  ggplot(aes(x=Metric, y=value)) +
+  geom_col(aes(fill=Area), position=position_dodge()) +
+  scale_fill_manual(name=NULL, values=bar_colours) +
+  scale_y_continuous(
+    name=NULL, 
+    labels=scales::label_percent(),
+    limits=c(0, 0.6)
+  ) +
+  geom_text(aes(label=scales::label_percent(accuracy=1)(value), colour=Area), position=position_dodge(width=0.9), vjust=-0.5) +
+  scale_colour_manual(name=NULL, values=bar_colours) +
+  labs(
+    title="Population and dwelling growth",
+    subtitle="2001-2021",
+    caption="Data StatCan census 2001-2021", 
+    x=NULL
+  ) +
+  theme(legend.position="bottom")
+
+```
+
+Since we have data on a DB level, we can also look at population and dwelling growth spatially in @fig-cum-change-avonmore-absolute and @fig-cum-change-avonmore-percent. It's really a few DBs that have grown, the rest either declined or remained stagnant.
+
+::: column-page-inset
+::: panel-tabset
+### Absolute Change
+
+```{r}
+#| label: fig-cum-change-avonmore-absolute
+#| fig-cap: Absolute change in population and dwellings around Avonmore Stop
+#| fig-subcap: 
+#|   - "Population"
+#|   - "Dwellings"
+#| layout-ncol: 2
+station_area_plot(
+  census_avonmore,
+  avonmore_stop_point,
+  aes(fill=population_growth), 
+  lrt_line=FALSE,
+  lrt_stop=TRUE,
+  lrt_stop_size=3,
+  remove_outside=FALSE,
+  alpha=0.7,
+  zoom=16
+) +
+  scale_fill_fermenter(
+    labels=scales::label_comma(style_positive="plus"),
+    palette="PiYG", 
+    direction=1, 
+    breaks=c(-20, -10, -5, 5, 10, 20)
+  ) +
+  labs(
+    fill=NULL, 
+    title="Population growth around Avonmore Stop",
+    subtitle="2001-2021",
+    caption="Data StatCan census 2001-2021, Map tiles © Stamen Design"
+  ) +
+  theme(legend.position="bottom", plot.margin=margin(unit="null")) + 
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top"), linetype="none")
+
+station_area_plot(
+  census_avonmore,
+  avonmore_stop_point,
+  aes(fill=dwellings_growth), 
+  lrt_line=FALSE,
+  lrt_stop=TRUE,
+  lrt_stop_size=3,
+  remove_outside=FALSE,
+  alpha=0.7,
+  zoom=16
+) +
+  scale_fill_fermenter(
+    labels=scales::label_comma(style_positive="plus"),
+    palette="RdBu", 
+    direction=-1, 
+    breaks=c(-20, -10, -5, 5, 10),
+  ) +
+  labs(
+    fill=NULL, 
+    title="Dwelling growth around Avonmore Stop",
+    subtitle="2001-2021",
+    caption="Data StatCan census 2001-2021, Map tiles © Stamen Design"
+  ) +
+  theme(legend.position="bottom") + 
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top"), linetype="none")
+```
+
+### Percent Change
+
+```{r}
+#| label: fig-cum-change-avonmore-percent
+#| fig-cap: Percent change in population and dwellings around Avonmore Stop
+#| fig-subcap: 
+#|   - "Population"
+#|   - "Dwellings"
+#| layout-ncol: 2
+station_area_plot(
+  census_avonmore,
+  avonmore_stop_point,
+  aes(fill=population_growth_pct), 
+  lrt_line=FALSE,
+  lrt_stop=TRUE,
+  lrt_stop_size=3,
+  remove_outside=FALSE,
+  alpha=0.7,
+  zoom=16
+) +
+  scale_fill_fermenter(
+    labels=scales::label_percent(style_positive="plus"),
+    palette="PiYG", 
+    direction=1, 
+    breaks=c(-30, -20, -10, -5, 5, 10, 20, 30)/100
+  ) +
+  labs(
+    fill=NULL, 
+    title="Population growth around Avonmore Stop",
+    subtitle="2001-2021",
+    caption="Data StatCan census 2001-2021, Map tiles © Stamen Design"
+  ) +
+  theme(legend.position="bottom") + 
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top"), linetype="none")
+
+station_area_plot(
+  census_avonmore,
+  avonmore_stop_point,
+  aes(fill=dwellings_growth_pct), 
+  lrt_line=FALSE,
+  lrt_stop=TRUE,
+  lrt_stop_size=3,
+  remove_outside=FALSE,
+  alpha=0.7,
+  zoom=16
+) +
+  scale_fill_fermenter(
+    labels=scales::label_percent(style_positive="plus"),
+    palette="RdBu", 
+    direction=-1, 
+    breaks=c(-30, -20, -10, -5, 5, 10, 20, 30)/100,
+  ) +
+  labs(
+    fill=NULL, 
+    title="Dwelling growth around Avonmore Stop",
+    subtitle="2001-2021",
+    caption="Data StatCan census 2001-2021, Map tiles © Stamen Design"
+  ) +
+  theme(legend.position="bottom") + 
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top"), linetype="none")
+```
+:::
+:::
+
+Since we have data from multiple censuses, we can also track change census-over-census, every five years from 2001 in @fig-census-over-census-bar. Like McKernan/Belgravia, Avonmore remained relatively static in every census period.
+
+```{r}
+#| label: fig-census-over-census-bar
+#| fig-cap: Census-over-census population and dwelling growth in the Avonmore Stop area and rest of Edmonton, 2001-2021
+
+census_data_long <- bind_rows(
+  list(
+    `Avonmore Stop`=census_avonmore,
+    `Rest of Edmonton`=census_except_avonmore
+  ),
+  .id="Area"
+) %>%
+  pivot_longer(
+    matches("Population|Dwellings"),
+    names_pattern="^(.+)_CA(\\d{2})$",
+    names_to=c("Metric", "Year"),
+    values_to="value"
+  ) %>%
+  filter(!is.na(Metric)) %>%
+  mutate(Year=glue::glue("20{Year}"))
+
+census_data_long %>%
+  st_drop_geometry() %>%
+  group_by(Area, Metric, Year) %>%
+  summarize(value=sum(value), .groups="drop_last") %>%
+  mutate(
+    lag_value=lag(value, order_by=Year), 
+    Period=glue::glue("{lag(Year, order_by=Year)}-{Year}"),
+    Change=value - lag_value,
+    Change_pct = value / lag_value - 1
+  ) %>%
+  ungroup() %>%
+  filter(Year != 2001) %>%
+  ggplot(aes(x=Period, y=Change_pct, fill=Area)) +
+  geom_col(position="dodge") + 
+  scale_fill_manual(values=bar_colours, name=NULL) +
+  geom_text(
+    aes(label=scales::label_percent(accuracy=1)(Change_pct), colour=Area, fill=NULL, vjust=-sign(Change_pct)), 
+    position=position_dodge(width=0.9)
+  ) +
+  scale_colour_manual(values=bar_colours, name=NULL) +
+  facet_wrap(~Metric) +
+  theme(legend.position="bottom") +
+  scale_y_continuous(labels=scales::label_percent(), limits=c(-0.07, 0.2)) +
+  labs(
+    x=NULL, 
+    y=NULL, 
+    title="Population and dwelling growth", 
+    subtitle="Census over census, 2001-2021",
+    caption="Data StatCan census 2001-2021"
+  ) +
+  guides(label="none", colour="none")
+```
+
+```{r}
+avonmore_census_over_census_data <- census_data_long %>%
+  filter(Area == "Avonmore Stop") %>%
+  group_by(TongfenID, Metric) %>%
+  mutate(
+    lag_value=lag(value, order_by=Year), 
+    Period=glue::glue("{lag(Year, order_by=Year)}-{Year}"),
+    Change=value - lag_value,
+    Change_pct = value / lag_value - 1
+  ) %>%
+  filter(Year != 2001) %>%
+  ungroup()
+
+```
+
+Once again, we can break down the census-over-census change by DB, as shown in @fig-avonmore-census-over-census-change-absolute and @fig-avonmore-census-over-census-change-percent. Notably, the large DB that covers Mill Creek Ravine seems to have staggered dwelling and population growth, from what seems to be the construction of the Conservatory Condominiums in 2005 and subsequent occupancy.
+
+::: panel-tabset
+### Absolute change
+
+```{r}
+#| label: fig-avonmore-census-over-census-change-absolute
+#| fig-cap: Census-over-census absolute change in population and dwellings around Avonmore Stop
+
+station_area_plot(
+  avonmore_census_over_census_data,
+  lrt_stop_data=avonmore_stop_point,
+  aes(fill=Change),
+  lrt_line=FALSE,
+  lrt_stop_size=1,
+  remove_outside=FALSE,
+  zoom=14
+) +
+  facet_grid(Metric ~ Period) +
+  scale_fill_fermenter(
+    labels=scales::label_number(style_positive="plus"),
+    palette="PiYG", 
+    direction=1, 
+    breaks=c(-30, -15, -5, 5, 15, 30),
+    name=NULL
+  ) +
+  theme_light() +
+  theme(
+    legend.position="bottom", 
+    axis.ticks=element_blank(), 
+    axis.text.x=element_blank(), 
+    axis.text.y=element_blank(),
+    panel.grid.major=element_blank(),
+    panel.spacing=unit(0, "null")
+  ) + 
+  guides(
+    fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top"), linetype="none"
+  ) +
+  labs(title="Change in population and dwellings around Avonmore Stop", caption="Data StatCan census 2001-2021, Map tiles © Stamen Design")
+```
+
+### Percent change
+
+```{r}
+#| label: fig-avonmore-census-over-census-change-percent
+#| fig-cap: Census-over-census percent change in population and dwellings around Avonmore Stop
+
+station_area_plot(
+  avonmore_census_over_census_data,
+  lrt_stop_data=avonmore_stop_point,
+  aes(fill=Change_pct),
+  lrt_line=FALSE,
+  lrt_stop_size=1,
+  remove_outside=FALSE,
+  zoom=14
+) +
+  facet_grid(Metric ~ Period) +
+  scale_fill_fermenter(
+    labels=scales::label_percent(style_positive="plus"),
+    palette="PiYG", 
+    direction=1, 
+    breaks=c(-30, -20, -10, -5, 5, 10, 20, 30) / 100,
+    name=NULL
+  ) +
+  theme_light() +
+  theme(
+    legend.position="bottom", 
+    axis.ticks=element_blank(), 
+    axis.text.x=element_blank(), 
+    axis.text.y=element_blank(),
+    panel.grid.major=element_blank(),
+    panel.spacing=unit(0, "null")
+  ) + 
+  guides(
+    fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top"), linetype="none"
+  ) +
+  labs(
+    title="Change in population and dwellings around Avonmore Stop",
+    caption="Data StatCan census 2001-2021, Map tiles © Stamen Design"
+  )
+```
+:::
+
+## No TOD here {#sec-no-tod-planned-here}
+
+While the census shows what happened in the past, zoning and district plans together show what we can expect for the future. Data for the new zoning is now available on Edmonton's open data portal. Data for the nodes and corridors of district planning is not available so I have drawn these borders manually based on the images in the Southeast district plan.
+
+```{r}
+area_prop_raw <- as.numeric(st_area(st_union(avonmore_nodes_corridors)) / st_area(avonmore_station_area))
+```
+
+@Fig-zoning-district-plan shows the zoning (as of January 1, 2024) and proposed nodes and corridors within the Avonmore Stop area. I have also overlaid smaller radii to compare Edmonton's plan with BC's new transit-oriented development legislation that will permit 20 storeys within 200m, 12 storeys within 400m and 8 storeys within the full 800m. It is solidly a low-rise zone area, with only some specific sites zoned for any higher density.
+
+Looking at the nodes and corridors map, we can see that there was no effort to include the LRT station within a node or corridor. Instead, there is a parallel secondary corridor running along 75 St and a bit of Argyll Road to the southeast. That means that only `r scales::label_percent(accuracy=1)(area_prop_raw)` of the station area will be covered by this secondary corridor, which is more of a coincidence than anything.
+
+```{r}
+#| label: fig-zoning-district-plan
+#| fig-cap: Land use in the Avonmore Stop area
+#| fig-subcap: 
+#|   - Zoning as of January 1, 2024
+#|   - Proposed nodes and corridors from district planning
+#| layout-ncol: 2
+#| column: page
+
+station_area_plot(
+  zoning,
+  avonmore_stop_point,
+  aes(fill=new_zone), 
+  fill_values=zone_colours,
+  alpha=0.4,
+  radius=c(units::set_units(800, "m"), units::set_units(400, "m"), units::set_units(200, "m")),
+  radius_linetypes=c("800m"="solid", "400m"="dashed", "200m"="dotted")
+) +
+  labs(fill="Zone", title="Zoning around Avonmore Stop")
+
+station_area_plot(
+  avonmore_nodes_corridors, 
+  avonmore_stop_point,
+  aes(fill=area_type),
+  fill_values=area_type_colours,
+  radius=c(units::set_units(800, "m"), units::set_units(400, "m"), units::set_units(200, "m")),
+  radius_linetypes=c("800m"="solid", "400m"="dashed", "200m"="dotted")
+) + 
+  labs(fill="Area type", title="Nodes and corridors around Avonmore Stop")
+```
+
+```{r}
+potential_residential <- avonmore_nodes_corridors %>%
+  st_intersection(
+    filter(
+      zoning, 
+      new_zone %in% c(
+        "MU - Low-rise mixed use",
+        "RS - Low rise up to 8 units",
+        "RM - Low-rise or shorter mid-rise apartments",
+        "DC - Direct control"
+      ),
+      )
+  ) %>%
+  st_make_valid()
+potential_residential_area_prop <- as.numeric(st_area(st_union(potential_residential)) / st_area(avonmore_station_area))
+
+```
+
+Now, using the zoning data, we can remove plots zoned for parks, fire halls and other jurisdictions, where housing is unlikely to be built, even through a rezoning. @Fig-nodes-corridors-residential shows the coverage of nodes and corridors when we exclude these zones. While there was already low node and corridor coverage, using this map, only `r scales::label_percent(accuracy=1)(potential_residential_area_prop)` of the station area is covered by the secondary corridors that will support up to 8 storeys.
+
+```{r}
+#| label: fig-nodes-corridors-residential
+#| fig-cap: Nodes and corridors around Avonmore Stop, only residential zones
+#| classes: preview-image
+station_area_plot(
+  potential_residential,
+  avonmore_stop_point,
+  aes(fill=area_type), 
+  fill_values=area_type_colours,
+  radius=c(units::set_units(800, "m"), units::set_units(400, "m"), units::set_units(200, "m")),
+  radius_linetypes=c("800m"="solid", "400m"="dashed", "200m"="dotted")
+) + 
+  labs(
+    fill="Area type", 
+    title="Nodes and corridors around Avonmore Stop", 
+    subtitle="Only RS, RM, MU and DC zones"
+  )
+```
+
+## Conclusion
+
+I think it's a significant missed opportunity that there are no policies to encourage higher-density development around rapid transit stations like Avonmore. Even worse than McKernan/Belgravia station, Avonmore stop is not even in a secondary corridor, making it likely that we will not see any additional density beyond the 8 units per lot allowed in the base RS zone.
+
+The district plans are still being edited and will come back to Council in Q2 2024. If you agree that we need more transit-oriented development policies in the district plans, please [email your councillor](https://www.edmonton.ca/city_government/mayor-city-councillors) and sign up for the [Grow Together Edmonton](https://www.gtyeg.ca/) mailing list to stay up-to-date on Edmonton housing news.
