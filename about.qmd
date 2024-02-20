@@ -1,5 +1,6 @@
 ---
 title: "About me"
+repo-actions: false
 ---
 
 ## Hi, I'm Jacob. Nice to meet you!
