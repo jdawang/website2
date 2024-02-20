@@ -1,18 +1,15 @@
 ---
 title: "About me"
+repo-actions: false
 ---
 
 ## Hi, I'm Jacob. Nice to meet you!
 
-::: {layout-ncol=2}
-
-::: {layout-nrow=2}
+::: {layout="[[1,1], [1]]"}
 
 ![After biking to Niagara Falls](files/go_train_bike.jpg)
 
 ![My partner and myself in Jasper](files/hiking.jpg)
-
-:::
 
 ![Climbing at the Niagara Glen](files/climbing.jpg)
 

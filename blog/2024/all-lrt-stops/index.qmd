@@ -1,0 +1,1798 @@
+---
+title: "Land use and growth around Edmonton's LRT stations"
+date: "2024-02-20"
+author: "Jacob Dawang"
+execute: 
+  cache: true
+categories: [map, data, housing, district planning, transit, edmonton]
+description: "A data-driven profile of Edmonton's LRT station areas using the census, open data and manually-drawn node and corridor boundaries from district planning."
+---
+
+Last year, I deputed at Edmonton City Council's Urban Planning Committee for district planning, urging them to have more consideration of density around transit.
+I used my previous posts on [McKernan Belgravia](/blog/2023/mckernan-belgravia-station/index.qmd) and [Avonmore](/blog/2023/avonmore-stop/index.qmd) as examples of planning to underbuild around billion-dollar rapid transit investments.
+Administration said that Avonmore was an outlier, so I thought I'd check that out.
+
+In this post, I've profiled every current and funded Edmonton LRT station area using:
+
+- District planning maps for nodes and corridors.
+- [Zoning Bylaw](https://data.edmonton.ca/Thematic-Features/Zoning-Bylaw-Geographical-Data/fixa-tstc/about_data) open data.
+- StatCan census via censusmapper.
+
+This took a much longer time than expected, as I had to draw the boundaries of the nodes and corridors manually.
+The Urban Planning Committee directed administration in the fall to show the boundaries of the nodes and corridors as blended, to show that it's not a hard line.
+That was undoubtedly a good move, but the resulting maps are not available and I wouldn't expect the approximate coverage of nodes and corridors to change that much.
+Here, I have used the old hard bounds from the draft district plans from the fall.
+
+```{r}
+library(sf)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(maptiles)
+library(tidytransit)
+library(tongfen)
+library(forcats)
+library(purrr)
+library(tidyterra)
+library(readr)
+library(mountainmathHelpers)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path=Sys.getenv("TONGFEN_CACHE_PATH")
+)
+crs <- "epsg:3857"
+
+zoning <- read_sf("../../2023/avonmore-stop/data/20001 Zoning Bylaw Geographic Data.geojson") %>%
+  mutate(
+    new_zone=case_match(
+      new_zone,
+      c("A", "A2", "A3", "AED", "BP",  "PS", "PSN", "PU", "AJ", "NA", "UF", "UI") ~ "Recreational/Civic/Institutional",
+      "AG" ~ "Agricultural",
+      "FD" ~ "Future development",
+      "MU" ~ case_when(
+        height <= 16 ~ "Low rise",
+        height <= 28 ~ "Mid rise",
+        .default=
+      ),
+      c("DC1", "DC2") ~ "Direct control",
+      c("RM", "BMR", "GMRA") ~ "Mid rise",
+      "CMU" ~ "Mid to high rise",
+      c("RS", "RSF", "BRH", "GRH", "MUN") ~ "Low rise",
+      c("RSM", "CCMD", "BLMR", "GLRA", "GLDF") ~ "Low to mid rise",
+      c("CG", "CN", "CCA") ~ "Commercial",
+      c("BE", "IM", "IH") ~ "Industrial",
+      c("CCHD", "HDR", "CMUV", "HA", "JAMSC", "RL", "RMU", "UW") ~ "High rise",
+      .default=new_zone
+    )
+  ) %>%
+  st_make_valid() %>%
+  st_transform(crs) %>%
+  group_by(new_zone) %>%
+  summarize(geometry=st_union(geometry)) %>%
+  ungroup() %>%
+  st_make_valid()
+ets_gtfs <- gtfs_as_sf(read_gtfs("data/ca-alberta-edmonton-transit-system-gtfs-714.zip"))
+lrt_routes <- get_route_geometry(ets_gtfs, route_ids=c("021R", "022R", "023R")) %>%
+  inner_join(ets_gtfs$routes %>% select(route_id, route_short_name, route_color), by="route_id") %>%
+  mutate(route_color=str_c("#", route_color)) %>%
+  st_transform(crs)
+
+future_lrt_stops <- read_sf("data/future_lrt_stops.geojson")
+
+lrt_stops <- filter_stops(
+  ets_gtfs,
+  route_ids=c("021R", "022R", "023R"),
+  service_ids=filter(ets_gtfs$calendar, date=="2023-11-09") %>% pull(service_id)
+) %>%
+  mutate(
+    stop_name=case_match(
+      stop_name,
+      "Bay Enterprise Square  Station" ~ "Bay Enterprise Square Station",
+      "Churchill Stop" ~ "Churchill Station",
+      .default=stop_name
+    )
+  ) %>%
+  filter(!(stop_name %in% c("Metro Line JTTl Track", "DL MacDonald Platform", "NAIT Station"))) %>%
+  bind_rows(
+    future_lrt_stops %>%
+      filter(!(stop_name %in% c("Castle Downs Station", "145 Ave Station", "137 Ave Station", "132 Ave Station")))
+  ) %>%
+  st_transform(crs) %>%
+  group_by(stop_name) %>%
+  summarize(geometry=st_union(geometry)) %>%
+  mutate(geometry=st_centroid(geometry), stop_name_short=str_remove(stop_name, " (Stop|Station)"))
+
+lrt_station_areas <- map(
+    c(800, 400, 200),
+    function(r) {
+      lrt_stops %>%
+        st_transform(4326) %>%
+        st_buffer(units::set_units(r, "m")) %>%
+        mutate(area=st_area(.), radius=paste0(r, "m")) %>%
+        st_transform(crs)
+  }
+) %>%
+  bind_rows()
+
+
+nodes_corridors <- read_sf("data/nodes_corridors.geojson") %>%
+  st_transform(crs) %>%
+  mutate(area_type=str_to_sentence(area_type))
+
+zone_colours <- c(
+  "Low rise"="#FFE302",
+  "Low to mid rise"="#FDC828",
+  "Mid rise"="orange",
+  "Mid to high rise"="#FD3D1F",
+  "High rise"="#FF0000",
+  "Commercial"="brown",
+  "Direct control"="#40E0D0",
+  "Recreational/Civic/Institutional"="#008800",
+  "Agricultural"="#33FF33",
+  "Industrial"="#666666",
+  "Future development"="purple"
+)
+
+area_type_colours <- c(
+  "Centre city"="#a56465",
+  "Major node"="#fd8e8d",
+  "District node"="#fead64",
+  "Primary corridor"="#f2cacb",
+  "Secondary corridor"="#f5deae"
+  )
+```
+
+```{r}
+
+get_coverage <- function(nodes_corridors_data, lrt_station_area_data, r) {
+  lrt_station_area_within_r <- lrt_station_area_data %>% filter(radius == r)
+  nodes_corridors_data %>%
+    st_intersection(lrt_station_area_within_r) %>%
+    st_transform(4326) %>%
+    mutate(node_corridor_area=st_area(.)) %>%
+    st_drop_geometry() %>%
+    group_by(stop_name, area_type) %>%
+    summarize(node_corridor_area=sum(node_corridor_area), .groups="drop") %>%
+    right_join(lrt_station_area_within_r, by="stop_name", relationship="many-to-one") %>%
+    mutate(
+      node_corridor_area=replace_na(node_corridor_area, units::set_units(0, "m^2")),
+      coverage=scales::oob_squish(
+        as.numeric(node_corridor_area / area)
+      )
+    ) %>%
+    group_by(stop_name) %>%
+    mutate(total_coverage=sum(coverage)) %>%
+    ungroup()
+}
+
+
+coverage_plot <- function(coverage_data) {
+
+  r <- pull(coverage_data, radius)
+  if (!all(r == r[1])) stop("Radius in data must be unique")
+
+  r <- r[1]
+
+  stop_levels <- coverage_data %>%
+    pivot_wider(
+      id_cols=c("stop_name_short", "total_coverage"),
+      names_from="area_type",
+      values_from="coverage",
+      values_fill=0
+    ) %>%
+    rename_all(function(c) str_to_lower(str_replace_all(c, fixed(" "), "_"))) %>%
+    select(-na) %>%
+    arrange(
+      total_coverage,
+      centre_city,
+      major_node,
+      primary_corridor,
+      district_node,
+      secondary_corridor
+    ) %>%
+    pull(stop_name_short)
+
+
+  ggplot(
+    coverage_data,
+    aes(
+      y=fct_relevel(stop_name_short, stop_levels),
+      x=coverage,
+      fill=fct_relevel(area_type, names(area_type_colours))
+    )
+  ) +
+    geom_col(position = position_stack(reverse = TRUE)) +
+    geom_text(aes(x=total_coverage, label=scales::label_percent(accuracy=1)(total_coverage)), hjust=-0.1) +
+    scale_x_continuous(labels=scales::label_percent(accuracy=1), limits=c(0, 1.1), expand=c(0, 0)) +
+    scale_fill_manual(values=area_type_colours) +
+    labs(
+      x="Node and corridor coverage",
+      y="Station",
+      fill="Area type",
+      title="Node and corridor coverage of Edmonton LRT station areas",
+      subtitle=glue::glue("Current and funded, within {r} radius of station")
+    )  +
+    theme(legend.position = c(0.8, 0.2))
+}
+
+
+coverage_plot_summary <- function(coverage_data) {
+
+  r <- pull(coverage_data, radius)
+  if (!all(r == r[1])) stop("Radius in data must be unique")
+
+  r <- r[1]
+
+  coverage_data <- coverage_data %>%
+    mutate(
+      density_level=case_match(
+        area_type,
+        c("Centre city", "Major node", "Primary corridor") ~ "High",
+        c("District node") ~ "Medium",
+        "Secondary corridor" ~ "Low"
+      )
+    )
+
+  bc_rows <- tribble(
+    ~stop_name_short, ~density_level, ~radius, ~coverage,
+    "BC Rapid transit station", "High", "800m", (200 / 800)^2,
+    "BC Rapid transit station", "Medium", "800m", 1 - (200 / 800)^2,
+    "BC Bus exchange", "Medium", "800m", (200 / 800)^2,
+    "BC Bus exchange", "Low", "800m", (400^2 - 200^2) / 800^2,
+    "BC Rapid transit station", "High", "400m", (200 / 400)^2,
+    "BC Rapid transit station", "Medium", "400m", 1 - (200 / 400)^2,
+    "BC Bus exchange", "Medium", "400m", (200 / 400)^2,
+    "BC Bus exchange", "Low", "400m", 1 - (200 / 400)^2,
+    "BC Rapid transit station", "High", "200m", 1,
+    "BC Bus exchange", "Medium", "200m", 1
+  ) %>%
+    filter(radius == r) %>%
+    group_by(stop_name_short) %>%
+    mutate(total_coverage= sum(coverage), stop_name_short= glue::glue("<b><i>{stop_name_short}</b></i>")) %>%
+    ungroup()
+
+  coverage_data <- bind_rows(coverage_data, bc_rows)
+
+  ggplot(
+    coverage_data,
+    aes(
+      y=fct_reorder(stop_name_short, total_coverage),
+      x=coverage,
+      fill=fct_relevel(density_level, rev(c("Low", "Medium", "High")))
+    )
+  ) +
+    geom_col(position = position_stack(reverse = TRUE)) +
+    geom_text(aes(x=total_coverage, label=scales::label_percent(accuracy=1)(total_coverage)), hjust=-0.1) +
+    scale_x_continuous(labels=scales::label_percent(accuracy=1), limits=c(0, 1.1), expand=c(0, 0)) +
+    scale_fill_manual(values=c("High"="#a56465", "Medium"="#fead64", "Low"="#f5deae")) +
+    labs(
+      x="Node and corridor coverage",
+      y="Station",
+      fill="Approximate density\npermitted",
+      title="District plan density permissions in Edmonton LRT station areas",
+      subtitle=glue::glue("Current and funded, within {r} radius of station")
+    )  +
+    theme(legend.position = c(0.8, 0.2), axis.text.y = ggtext::element_markdown())
+}
+```
+
+## Node and corridor coverage
+
+First, here is the raw node and corridor coverage according to the draft district plans for each of the LRT stations.
+Avonmore is one of the least covered, but is by no means alone.
+
+::: panel-tabset
+## 800m radius
+
+```{r}
+#| fig-height: 10
+
+get_coverage(nodes_corridors, lrt_station_areas, "800m") %>%
+  coverage_plot()
+```
+
+## 400m radius
+
+```{r}
+#| fig-height: 10
+
+get_coverage(nodes_corridors, lrt_station_areas, "400m") %>%
+  coverage_plot()
+```
+
+## 200m radius
+
+```{r}
+#| fig-height: 10
+
+get_coverage(nodes_corridors, lrt_station_areas, "200m") %>%
+  coverage_plot()
+```
+:::
+
+## Compared to BC's TOD policy
+
+Here, I have combined the nodes and corridors, somewhat subjectively, into larger density buckets to compare them with British Columbia's new TOD policy.
+We should be aiming to be permitting at least as much housing as BC is around their rapid transit stations.
+At the very least, we should be concerned when some of the LRT stations in residential areas are proposed to have less planning for higher density than BC bus exchanges.
+Some of the stations that would benefit from increased density permissions include McKernan Belgravia, Holyrood, and Glenwood/Sherwood.
+But, even stations like Bonnie Doon and Southgate would benefit from higher density permissions, as they designate the mall lands for higher density and not much else outside of it.
+In the end, LRT stations having better proposed land use than a generic bus exchange in our neighbouring province is not a cause for celebration, but a reminder that we need to strive for better.
+
+::: panel-tabset
+## 800m radius
+
+```{r}
+#| fig-height: 11
+
+get_coverage(nodes_corridors, lrt_station_areas, "800m") %>%
+  coverage_plot_summary()
+```
+
+## 400m radius
+
+```{r}
+#| fig-height: 11
+
+get_coverage(nodes_corridors, lrt_station_areas, "400m") %>%
+  coverage_plot_summary()
+```
+
+## 200m radius
+
+```{r}
+#| fig-height: 11
+
+get_coverage(nodes_corridors, lrt_station_areas, "200m") %>%
+  coverage_plot_summary()
+```
+:::
+
+```{r}
+outside_area <- function(.data) {
+  st_bbox(.data) %>%
+    st_as_sfc() %>%
+    st_transform(4326) %>%
+    st_buffer(units::set_units(4, "m")) %>%
+    st_transform(st_crs(.data)) %>%
+    st_difference(.data)
+}
+station_area_plot <- function(
+    .data,
+    lrt_stop_data,
+    mapping,
+    radius=units::set_units(800, "m"),
+    radius_linetypes="solid",
+    fill_values=NULL,
+    alpha=0.8,
+    lrt_line=TRUE,
+    lrt_stop=TRUE,
+    lrt_stop_size=3,
+    remove_outside=TRUE,
+    zoom=15
+) {
+  station_areas <- purrr::map(
+    radius,
+    function(x) {
+      lrt_stop_data %>%
+        st_transform(4326) %>%
+        st_buffer(x) %>%
+        st_transform(st_crs(lrt_stop_data))
+    }
+  ) %>%
+    magrittr::set_names(
+      glue::glue("{as.character(radius)}{units::deparse_unit(radius)}") %>%
+        factor()
+    ) %>%
+    bind_rows(.id="Radius")
+
+  if (!is.null(fill_values)) scale <- scale_fill_manual(values=fill_values)
+  else scale <- NULL
+
+  if (lrt_line) {
+    lrt_layer <- geom_sf(
+      data=lrt_routes %>% st_intersection(st_bbox(st_union(station_areas)) %>% st_as_sfc()),
+      mapping=aes(colour=route_short_name),
+      linewidth=1.2
+    )
+    lrt_colours <- pull(lrt_routes, route_color)
+    names(lrt_colours) <- pull(lrt_routes, route_short_name)
+    lrt_colour_scale <- scale_colour_manual(values=lrt_colours, labels=NULL, name=NULL, guide=NULL)
+
+  }
+  else {
+    lrt_layer <- NULL
+    lrt_colour_scale <- NULL
+  }
+
+  if (lrt_stop) {
+    lrt_stop_layer <- geom_sf(
+      data=lrt_stop_data %>% st_intersection(st_union(station_areas)), size=lrt_stop_size
+    )
+  }
+  else lrt_stop_layer <- NULL
+
+  if (remove_outside) {
+    plot_data <- .data %>% st_intersection(st_union(station_areas)) %>% st_make_valid()
+    remove_outside_layer <- geom_sf(data=outside_area(st_union(station_areas)), fill="white", colour=NA)
+  }
+  else {
+    remove_outside_layer <- NULL
+    plot_data <- .data
+  }
+
+  ggplot() +
+    remove_outside_layer +
+    geom_sf(data=plot_data, mapping=mapping, alpha=alpha) +
+    scale +
+    scale_linetype_manual(values=radius_linetypes) +
+    geom_roads(data=st_union(station_areas), nextzen_api_key=Sys.getenv("NEXTZEN_API_KEY"), transform=function(d) filter(d, kind %in% c("major_road","minor_road","highway"))) +
+    geom_water(data=st_union(station_areas), nextzen_api_key=Sys.getenv("NEXTZEN_API_KEY")) +
+    lrt_layer +
+    lrt_colour_scale +
+    lrt_stop_layer +
+    geom_sf(
+      data=st_boundary(station_areas),
+      mapping=aes(linetype=Radius),
+      fill="transparent",
+      linewidth=1.1
+    ) +
+    theme_void() +
+    labs(caption="Data City of Edmonton, viz Jacob Dawang") +
+    coord_sf(expand=FALSE)
+}
+```
+
+```{r}
+station_plots <- map(
+  pull(lrt_stops, stop_name_short) %>% set_names(., .),
+  function(s) {
+    station_area_plot(
+      nodes_corridors,
+      lrt_stops %>% filter(stop_name_short == s),
+      mapping=aes(fill=area_type),
+      fill_values=area_type_colours,
+      radius=c(
+        units::set_units(800, "m"),
+        units::set_units(400, "m"),
+        units::set_units(200, "m")
+      ),
+      radius_linetypes=c(
+        "800m"="solid", "400m"="dashed", "200m"="dotted"
+      ),
+      lrt_line=TRUE
+    ) +
+      labs(fill="Area type", title=glue::glue("Nodes and corridors around {s} LRT station"))
+  }
+)
+
+station_zoning_plots <- map(
+  pull(lrt_stops, stop_name_short) %>% set_names(., .),
+  function(s) {
+    station_area_plot(
+      zoning,
+      lrt_stops %>% filter(stop_name_short == s),
+      mapping=aes(fill=new_zone),
+      fill_values=zone_colours,
+      radius=c(
+        units::set_units(800, "m"),
+        units::set_units(400, "m"),
+        units::set_units(200, "m")
+      ),
+      radius_linetypes=c(
+        "800m"="solid", "400m"="dashed", "200m"="dotted"
+      ),
+      lrt_line=TRUE
+    ) +
+      labs(fill="Area type", title=glue::glue("Zoning around {s} LRT station"))
+  }
+)
+```
+
+```{r}
+census_years <- seq(2001, 2021, 5)
+meta <- purrr::map(
+  census_years,
+  function(y) meta_for_additive_variables(paste0("CA",substr(y,3,4)), c("Population","Dwellings"))
+) %>%
+  bind_rows()
+census_data <- get_tongfen_ca_census(
+  regions=list(CSD="4811061"),  # Edmonton CSD
+  meta=meta,
+  level="DB",
+  base_geo="CA21",
+  crs=crs
+)
+```
+
+```{r}
+prep_census_station_data <- function(.stop_name_short) {
+  station_area <- lrt_station_areas %>%
+    filter(
+      radius == "800m",
+      str_to_lower(stop_name_short) == str_to_lower(.stop_name_short)
+    )
+
+  census_overlap_any <- census_data %>%
+    st_filter(station_area) %>%
+    mutate(a=st_area(.) %>% as.numeric) %>%
+    mutate(ai=st_area(st_intersection(.,station_area)) %>% as.numeric)
+
+  census <- census_overlap_any %>%
+    filter(ai / a > 0.5) %>%
+    mutate(
+      population_growth=Population_CA21 - Population_CA01,
+      population_growth_pct=replace_na(Population_CA21 / Population_CA01 - 1, 0),
+      dwellings_growth=Dwellings_CA21 - Dwellings_CA01,
+      dwellings_growth_pct=replace_na(Dwellings_CA21 / Dwellings_CA01 - 1, 0)
+    )
+  return(census)
+}
+```
+
+```{r}
+census_population_growth_plot <- function(.stop_name_short) {
+  census_station_data <- prep_census_station_data(.stop_name_short)
+  station_area_plot(
+    census_station_data,
+    filter(lrt_stops, str_to_lower(stop_name_short) == str_to_lower(.stop_name_short)),
+    aes(fill=scales::oob_squish_any(population_growth_pct, c(-0.3, 0.3))),
+    radius=c(units::set_units(800, "m"), units::set_units(400, "m"), units::set_units(200, "m")),
+    radius_linetypes=c("800m"="solid", "400m"="dashed", "200m"="dotted"),
+    lrt_line=TRUE,
+    alpha=0.7,
+    zoom=16,
+    remove_outside=FALSE
+  ) +
+  labs(
+    fill=NULL,
+    title=glue::glue("Population growth in {.stop_name_short} station area"),
+    subtitle="2001-2021",
+    caption="Data StatCan census 2001-2021"
+  )  +
+  scale_fill_steps2(
+    labels=scales::label_percent(style_positive="plus"),
+    low="#8E0152",
+    mid="#F7F7F7",
+    high="#276419",
+    breaks=c(-30, -20, -10, -5, 5, 10, 20, 30)/100
+  ) +
+  theme(legend.position="bottom") +
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top"), linetype="none")
+}
+census_dwellings_growth_plot <- function(.stop_name_short) {
+  census_station_data <- prep_census_station_data(.stop_name_short)
+  station_area_plot(
+    census_station_data,
+    filter(lrt_stops, str_to_lower(stop_name_short) == str_to_lower(.stop_name_short)),
+    aes(fill=scales::oob_squish_any(dwellings_growth_pct, c(-0.3, 0.3))),
+    radius=c(units::set_units(800, "m"), units::set_units(400, "m"), units::set_units(200, "m")),
+    radius_linetypes=c("800m"="solid", "400m"="dashed", "200m"="dotted"),
+    lrt_line=TRUE,
+    alpha=0.7,
+    zoom=16,
+    remove_outside=FALSE
+  ) +
+  labs(
+    fill=NULL,
+    title=glue::glue("Dwellings growth in {.stop_name_short} station area"),
+    subtitle="2001-2021",
+    caption="Data StatCan census 2001-2021"
+  )  +
+  scale_fill_steps2(
+    labels=scales::label_percent(style_positive="plus"),
+    low="#053061",
+    mid="#F7F7F7",
+    high="#67001F",
+    breaks=c(-30, -20, -10, -5, 5, 10, 20, 30)/100
+  ) +
+  theme(legend.position="bottom") +
+  guides(fill=guide_coloursteps(even.steps=TRUE, barwidth=20, title.position="top"), linetype="none")
+}
+census_population_growth_plots <- map(
+  pull(lrt_stops, stop_name_short) %>% set_names(., .),
+  census_population_growth_plot
+)
+census_dwellings_growth_plots <- map(
+  pull(lrt_stops, stop_name_short) %>% set_names(., .),
+  census_dwellings_growth_plot
+)
+```
+
+```{r}
+census_barplot <- function(.stop_name_short) {
+  census_station_data <- prep_census_station_data(.stop_name_short)
+  census_except_station_data <- census_data %>%
+    filter(!(TongfenID %in% pull(census_station_data, TongfenID)))
+
+  area_names <- c(.stop_name_short, "Rest of Edmonton")
+  bar_colours <- c("#994F00", "#006CD1") %>% set_names(area_names)
+
+  overall_growth <- bind_rows(
+    list(
+      census_station_data,
+      census_except_station_data
+    ) %>%
+      set_names(area_names),
+    .id="Area"
+  ) %>%
+    group_by(Area) %>%
+    summarize(
+      Population=sum(Population_CA21) / sum(Population_CA01) - 1,
+      Dwellings=sum(Dwellings_CA21) / sum(Dwellings_CA01) -1,
+      .groups="drop"
+    ) %>%
+    st_drop_geometry() %>%
+    pivot_longer(
+      c(Population, Dwellings),
+      names_to="Metric",
+      values_to="Change_pct"
+    ) %>%
+    mutate(Period="Cum. 2001-2021")
+
+
+  year_over_year_growth <- bind_rows(
+    list(
+      census_station_data,
+      census_except_station_data
+    ) %>%
+      set_names(area_names),
+    .id="Area"
+  ) %>%
+  pivot_longer(
+    matches("Population|Dwellings"),
+    names_pattern="^(.+)_CA(\\d{2})$",
+    names_to=c("Metric", "Year"),
+    values_to="value"
+  ) %>%
+  filter(!is.na(Metric)) %>%
+  mutate(Year=glue::glue("20{Year}")) %>%
+  st_drop_geometry() %>%
+  group_by(Area, Metric, Year) %>%
+  summarize(value=sum(value), .groups="drop_last") %>%
+  mutate(
+    lag_value=lag(value, order_by=Year),
+    Period=glue::glue("{lag(Year, order_by=Year)}-{Year}"),
+    Change=value - lag_value,
+    Change_pct = value / lag_value - 1
+  ) %>%
+  ungroup() %>%
+  filter(Year != 2001)
+
+  bind_rows(year_over_year_growth, overall_growth) %>%
+  ggplot(aes(x=Period, y=Change_pct, fill=fct_relevel(Area, area_names))) +
+  geom_col(position="dodge") +
+  scale_fill_manual(values=bar_colours, name=NULL) +
+  geom_text(
+    aes(label=scales::label_percent(accuracy=1)(Change_pct), colour=fct_relevel(Area, area_names), fill=NULL, vjust=-sign(Change_pct)),
+    position=position_dodge(width=0.9)
+  ) +
+  scale_colour_manual(values=bar_colours, name=NULL) +
+  facet_wrap(~Metric) +
+  theme(legend.position="bottom") +
+  scale_y_continuous(labels=scales::label_percent(), limits=function(x) c(x[1]-0.1, x[2]+0.1)) +
+  labs(
+    x=NULL,
+    y=NULL,
+    title=glue::glue("Population and dwelling growth in {.stop_name_short} station area"),
+    subtitle="Census over census, 2001-2021",
+    caption="Data StatCan census 2001-2021"
+  ) +
+  guides(label="none", colour="none")
+}
+census_barplots <- map(
+  pull(lrt_stops, stop_name_short) %>% set_names(., .),
+  census_barplot
+)
+```
+
+```{r}
+census_growth_all <- map(
+  pull(lrt_stops, stop_name_short) %>% set_names(.,.),
+  function(s) {
+    prepped_data <- prep_census_station_data(s)
+    if (nrow(prepped_data) == 0) {
+      return(tribble(~Population, ~Dwellings, 0, 0))
+    }
+    prepped_data %>%
+      summarize(
+        Population=sum(Population_CA21) / sum(Population_CA01) - 1,
+        Dwellings=sum(Dwellings_CA21) / sum(Dwellings_CA01) -1
+      ) %>%
+      st_drop_geometry()
+  }
+) %>% 
+  bind_rows(.id="stop_name_short")
+```
+
+## Growth power ranking
+
+Using census data, I tabulated population and dwelling growth for each of the station areas between 2001-2021.
+I followed the same methodology for aligning the station area with the census dissemination blocks as in my posts for [McKernan Belgravia Station](/blog/2023/mckernan-belgravia-station/index.qmd#sec-growth-or-not).
+Dissemination blocks are considered part of the station area if over 50% of their area is within a 800m radius of the station.
+
+::: {.callout-note}
+
+I excluded Davies and Lewis Farms from these charts as they are majority industrial and agricultural in 2001.
+Having almost no population or dwellings in the base year messes up the chart.
+
+:::
+
+::: panel-tabset
+
+### Population
+
+```{r}
+#| fig-height: 10
+ggplot(
+    census_growth_all %>% filter(!(stop_name_short %in% c("Davies", "Lewis Farms"))),
+    aes(
+      y=fct_reorder(stop_name_short, Population),
+      x=Population
+    )
+  ) +
+    geom_col(fill="#663f5f") +
+    geom_text(aes(x=Population, label=scales::label_percent(accuracy=1)(Population), hjust=ifelse(Population >=-0.005, -0.1, 1))) +
+    scale_x_continuous(labels=scales::label_percent(accuracy=1), limits=c(-0.3, 2.25)) +
+    labs(
+      x="Population Growth",
+      y="Station",
+      title="Population growth of Edmonton LRT station areas",
+      subtitle="2001-2021, 800m radius"
+    )  +
+    theme(legend.position = c(0.8, 0.2))
+```
+
+### Dwellings
+
+```{r}
+#| fig-height: 10
+
+ggplot(
+    census_growth_all %>% filter(!(stop_name_short %in% c("Davies", "Lewis Farms"))),
+    aes(
+      y=fct_reorder(stop_name_short, Dwellings),
+      x=Dwellings
+    )
+  ) +
+    geom_col(fill="#663f5f") +
+    geom_text(aes(x=Dwellings, label=scales::label_percent(accuracy=1)(Dwellings), hjust=ifelse(Dwellings >=-0.005, -0.1, 1))) +
+    scale_x_continuous(labels=scales::label_percent(accuracy=1), limits=c(-0.3, 2.25)) +
+    labs(
+      x="Dwelling Growth",
+      y="Station",
+      title="Dwelling growth of Edmonton LRT station areas",
+      subtitle="2001-2021, 800m radius"
+    )  +
+    theme(legend.position = c(0.8, 0.2))
+```
+:::
+
+```{r}
+for (stop_name in pull(lrt_stops, stop_name_short)) {
+    stop_name_sanitized <- str_to_lower(stop_name) %>% 
+      str_replace_all(" ", "-") %>% 
+      str_replace_all("/", "-")
+    message(
+      glue::glue("### <<stop_name>> {#sec-<<stop_name_sanitized>>}", .open="<<", .close=">>")
+      )
+}
+```
+
+## Stations
+
+Lots of plots here, but this is where you'll find a profile of each station's land use and growth.
+
+### 102 Street {#sec-102-street}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "102 Street"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+
+### 124 Street {#sec-124-street}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "124 Street"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Aldergrove/Belmead {#sec-aldergrove-belmead}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Aldergrove/Belmead"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Alex Decoteau {#sec-alex-decoteau}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Alex Decoteau"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Avonmore {#sec-avonmore}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Avonmore"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Bay Enterprise Square {#sec-bay-enterprise-square}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Bay Enterprise Square"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Belvedere {#sec-belvedere}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Belvedere"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Blatchford Gate {#sec-blatchford-gate}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Blatchford Gate"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Bonnie Doon {#sec-bonnie-doon}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Bonnie Doon"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Brewery/120 Street {#sec-brewery-120-street}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Brewery/120 Street"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Central {#sec-central}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Central"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Century Park {#sec-century-park}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Century Park"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Churchill {#sec-churchill}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Churchill"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Clareview {#sec-clareview}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Clareview"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+
+### Coliseum {#sec-coliseum}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Coliseum"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Corona {#sec-corona}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Corona"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+
+### Davies {#sec-davies}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Davies"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+
+::: {.callout-note}
+Because Davies is such an industrial area, the census data shows wild swings percentage-wise.
+:::
+
+
+### Glenora {#sec-glenora}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Glenora"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+#| classes: preview-image
+census_barplots[[station_name]]
+```
+### Glenwood/Sherwood {#sec-glenwood-sherwood}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Glenwood/Sherwood"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Government {#sec-government}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Government"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Grey Nuns {#sec-grey-nuns}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Grey Nuns"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Grovenor/142 Street {#sec-grovenor-142-street}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Grovenor/142 Street"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Health Sciences Jubilee {#sec-health-sciences-jubilee}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Health Sciences Jubilee"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Heritage Valley North {#sec-heritage-valley-north}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Heritage Valley North"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Holyrood {#sec-holyrood}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Holyrood"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Jasper Place {#sec-jasper-place}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Jasper Place"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Kingsway RAH {#sec-kingsway-rah}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Kingsway RAH"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Lewis Farms {#sec-lewis-farms}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Lewis Farms"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+::: {.callout-note}
+Because Lewis Farms has so little residential, there are no dissemination blocks included in the station area.
+The census plots cannot be generated.
+:::
+
+### MacEwan Arts/112 Street {#sec-macewan-arts-112-street}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "MacEwan Arts/112 Street"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### MacEwan {#sec-macewan}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "MacEwan"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### McKernan Belgravia {#sec-mckernan-belgravia}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "McKernan Belgravia"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Meadowlark {#sec-meadowlark}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Meadowlark"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Mill Woods {#sec-mill-woods}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Mill Woods"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Millbourne/Woodvale {#sec-millbourne-woodvale}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Millbourne/Woodvale"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Misericordia {#sec-misericordia}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Misericordia"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Muttart {#sec-muttart}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Muttart"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### NAIT/Bltachford Market {#sec-nait-bltachford-market}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "NAIT/Bltachford Market"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### NorQuest {#sec-norquest}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "NorQuest"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Quarters {#sec-quarters}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Quarters"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### South Campus Ft Edmonton {#sec-south-campus-ft-edmonton}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "South Campus Ft Edmonton"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Southgate {#sec-southgate}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Southgate"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Stadium {#sec-stadium}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Stadium"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Stony Plain Road/149 St {#sec-stony-plain-road-149-st}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Stony Plain Road/149 St"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Strathearn {#sec-strathearn}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Strathearn"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### The Yards/116 Street {#sec-the-yards-116-street}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "The Yards/116 Street"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### Twin Brooks {#sec-twin-brooks}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "Twin Brooks"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### University {#sec-university}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "University"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```
+### West Edmonton Mall {#sec-west-edmonton-mall}
+```{r}
+#| layout-ncol: 2
+
+station_name <- "West Edmonton Mall"
+station_plots[[station_name]]
+station_zoning_plots[[station_name]]
+```
+
+```{r}
+#| layout-ncol: 2
+#| fig-height: 6
+
+census_dwellings_growth_plots[[station_name]]
+census_population_growth_plots[[station_name]]
+```
+
+```{r}
+#| fig-width: 9
+census_barplots[[station_name]]
+```

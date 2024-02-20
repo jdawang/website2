@@ -2,6 +2,7 @@
 title: "Jacob Dawang"
 image: files/profile.jpg
 image-alt: "Jacob Dawang profile picture"
+repo-actions: false
 about:
   template: jolla
   links:
