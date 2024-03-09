@@ -40,8 +40,6 @@ peds <- read_sf("data/peds/census_profiles_by_electoral_division_2021.shp") %>%
 
 ```
 
-sadasd
-
 ```{r}
 #| label: load-census
 
