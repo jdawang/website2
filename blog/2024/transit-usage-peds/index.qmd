@@ -1,0 +1,134 @@
+---
+title: "Transit commute mode share by provincial electoral division"
+date: "2024-03-09"
+categories:
+  - map
+  - data
+  - transit
+  - edmonton
+execute: 
+  cache: true
+  freeze: true
+link-external-newwindow: true
+link-external-icon: true
+description: "Quick maps of mode share by provincial electoral division in Edmonton."
+---
+
+Just some quick plots I made for public and active transit commute mode share by provincial electoral division in Edmonton. [Tongfen](https://github.com/mountainMath/tongfen) made this super easy, as usual. Note that commute mode share is defined as going from place of residence to place of work. Many trips are not commutes, but are not captured by this census variable.
+
+```{r}
+#| label: libraies
+library(sf)
+library(stringr)
+library(dplyr)
+library(ggplot2)
+library(tongfen)
+library(cancensus)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path=Sys.getenv("TONGFEN_CACHE_PATH")
+)
+```
+
+```{r}
+#| label: load-peds
+
+peds <- read_sf("data/peds/census_profiles_by_electoral_division_2021.shp") %>%
+  filter(str_detect(EDNAME, fixed("Edmonton"))) %>%
+  select(EDNAME)
+
+```
+
+```{r}
+#| label: load-census
+
+meta <- meta_for_ca_census_vectors(
+  c(
+    car="v_CA21_7635",
+    transit="v_CA21_7644",
+    walk="v_CA21_7647",
+    bicycle="v_CA21_7650",
+    other="v_CA21_7653",
+    total="v_CA21_7632"
+  )
+)
+
+commute_mode_peds <- tongfen_estimate_ca_census(peds, meta, level="CT", intersection_level="CT", na.rm=TRUE)
+```
+
+::: panel-tabset
+## Transit
+
+```{r}
+#|label: public
+
+ggplot(commute_mode_peds) +
+  geom_sf(aes(fill=transit/total)) +
+  scale_fill_viridis_c(
+    labels=scales::label_percent(), 
+    limits=c(0, 0.2),
+    option="plasma",
+    direction=-1,
+    guide=guide_colourbar(position="bottom")
+  ) +
+  labs(
+    title="Public transit commute mode share in Edmonton",
+    subtitle="By provincial electoral division",
+    fill=NULL,
+    caption="Data StatCan census 2021 and Alberta Open Data, viz Jacob Dawang"
+  ) +
+  theme_void()
+```
+
+## Active transit
+
+```{r}
+#|label: active
+
+ggplot(commute_mode_peds) +
+  geom_sf(aes(fill=(walk + bicycle)/total)) +
+  scale_fill_viridis_c(
+    labels=scales::label_percent(), 
+    limits=c(0, 0.2),
+    option="plasma",
+    direction=-1,
+    guide=guide_colourbar(position="bottom")
+  ) +
+  labs(
+    title="Walk and bike commute mode share in Edmonton",
+    subtitle="By provincial electoral division",
+    fill=NULL,
+    caption="Data StatCan census 2021 and Alberta Open Data, viz Jacob Dawang"
+  ) +
+  theme_void()
+```
+
+## Transit and active transit
+
+::: callout-warning
+The scale is different in this plot.
+:::
+
+```{r}
+#|label: transit-active
+
+ggplot(commute_mode_peds) +
+  geom_sf(aes(fill=(walk + bicycle + transit)/total)) +
+  scale_fill_viridis_c(
+    labels=scales::label_percent(),
+    oob=scales::squish,
+    limits=c(0, 0.4),
+    option="plasma",
+    direction=-1,
+    guide=guide_colourbar(position="bottom")
+  ) +
+  labs(
+    title="Public and active transit commute mode share in Edmonton",
+    subtitle="By provincial electoral division",
+    fill=NULL,
+    caption="Data StatCan census 2021 and Alberta Open Data, viz Jacob Dawang"
+  ) +
+  theme_void()
+```
+:::
