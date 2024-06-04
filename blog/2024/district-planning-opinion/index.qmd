@@ -1,0 +1,32 @@
+---
+title: "Why and how Edmonton's District Plans should be revised"
+date: "2024-06-04"
+author: "Jacob Dawang"
+categories: [housing, district planning, transit, edmonton]
+description: "My take on why and how Edmonton City Council should revise district plans and policy in favour of housing. Housing around transit and post-secondary institutions will be key."
+image: "/blog/2024/all-lrt-stops-updated/index_files/figure-html/unnamed-chunk-104-1.png"
+---
+
+Edmonton faces a housing crisis that has engulfed most major Canadian cities. Down south, Calgary, once known for its affordability, has seen rent and home prices soar as Canadians move to Alberta. With Edmonton also experiencing unprecedented population growth, we need to build a lot more homes if we want to remain affordable.
+
+This growth isn’t entirely unexpected, even if it has been faster than anticipated. The City’s district plans, which will continue to be heard at a public hearing on June 25, map out what it calls nodes and corridors to address this growth. These nodes and corridors are areas where the City will aim to permit higher-density housing. Unfortunately, this strategy only looks worse as Edmonton's growth accelerates and our challenges mount.
+
+As currently written, these plans risk stifling home building where it is most needed. Take the areas within walking distance of LRT stations, typically considered to be 800m from the platforms. Building homes near LRT stations means more people can live a short ride away from jobs, services and opportunities, a level of mobility regular buses cannot provide. For drivers, more people on transit means fewer people clogging up roads. Everyone benefits when we make efficient use of our existing rapid transit investments.
+
+Unfortunately, district plans do not allow nearly enough density around the LRT. Consider McKernan/Belgravia Station. Despite being right next to the University of Alberta, it only houses a fraction of the 40,000 students and 10,000 hospital staff who commute there, and is one of the most expensive areas to live. [Data I compiled from district plans](/blog/2024/all-lrt-stops-updated/index.qmd) show that only 33% of the area within walking distance of the station is designated as a node or corridor. In effect, district plans reserve 2/3 of the McKernan Belgravia station area for low-density housing that few people can afford.
+
+![Nodes and Corridors around McKernan/Belgravia Station](/blog/2024/all-lrt-stops-updated/index_files/figure-html/unnamed-chunk-104-1.png)
+
+Instead, district plans should adopt British Columbia's transit-oriented housing approach. Last year, in a move lauded by housing advocates, BC's government introduced legislation allowing mid-rise housing within 800m and high-rise housing within 200m of transit stations.
+
+![BC's TOD policy](/blog/2023/bc-tod-toronto/bc_tod_chart.png)
+
+The federal government is on board with BC's policy. In this year's budget, the feds announced that they will require cities to permit high-density housing [within 800m of transit stations](https://www.infrastructure.gc.ca/housing-logement/housing-plan-report-rapport-plan-logement-eng.html) to gain access to the $3 billion per year permanent public transit fund. Don't expect a change if the Conservatives form government. Pierre Poilievre has promised to withhold money from cities that do not allow high-density housing near transit. No matter who is in power, revising district plans to permit more housing around transit will be crucial to increase the supply of housing in high-demand areas and get Edmonton’s fair share of federal money.
+
+District plans lack ambition in more places than around LRT stations. Other high-demand areas are questionably drawn out of nodes and corridors. For example, the University major node excludes Windsor Park entirely, despite being located across the street from the university campus. This means that almost the entire neighbourhood will be reserved for low-density housing. This decision is puzzling, given the University of Alberta is increasing enrolment by 16,000 students over the next decade, more than the current population of Windsor Park, Belgravia, McKernan, and Garneau combined. If district plans are not amended, Windsor Park will only become more exclusive, while students, university workers, and hospital staff will be forced into long commutes with either inadequate transit options or expensive parking.
+
+{{< tweet user="jacoobaloo" id="1782527845081678154" >}}
+
+Certainly, there is some value in district plans, primarily in the way they modernize and simplify many outdated area plans. Outside of that, though, district plans give Edmontonians a false expectation: that we can simultaneously grow to two million people and improve housing affordability without allowing higher density housing in more places.
+
+Change is never easy, but it's inevitable. We cannot prevent people from moving to our city; we can only decide how we respond. Let's choose to avoid the housing crisis that's taken over the rest of Canada. This starts with revising district plans to permit higher-density housing within walking distance of LRT stations and post-secondary institutions. By making the tough, but necessary decisions with district plans, we can keep Edmonton welcoming and affordable for all.
