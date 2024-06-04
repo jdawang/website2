@@ -1,9 +1,9 @@
 ---
-title: "Why and how Edmonton's District Plans should be revised"
+title: "District Planning Needs Changes"
 date: "2024-06-04"
 author: "Jacob Dawang"
 categories: [housing, district planning, transit, edmonton]
-description: "My take on why and how Edmonton City Council should revise district plans and policy in favour of housing. Housing around transit and post-secondary institutions will be key."
+description: "My take on why and how Edmonton City Council should revise district plans and policy in favour of housing. In short, we need stronger support for mid-rise housing around transit and post-secondary institutions."
 image: "/blog/2024/all-lrt-stops-updated/index_files/figure-html/unnamed-chunk-104-1.png"
 ---
 
