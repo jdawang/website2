@@ -1,0 +1,17 @@
+---
+title: "Land use and growth around Edmonton's LRT stations"
+date: "2024-10-19"
+author: "Jacob Dawang"
+execute: 
+  cache: true
+categories: [housing, priority growth areas, edmonton, opinion]
+description: "I wrote an op-ed in favour of Edmonton's plan to upzone Garneau."
+image: headline.png
+---
+
+I recently wrote an [op-ed in the Edmonton Journal](https://edmontonjournal.com/opinion/columnists/opinion-rezoning-in-garneau-will-improve-housing-options-for-everyone), with Aden Murphy, supporting the City's proposal to upzone much of Garneau.
+We argue that upzoning is essential to good housing outcomes for everyone who wants to live in Garneau, students, singles and families.
+Keeping houses low-rise will maintain a certain exterior appearance, but at the end of the day, without more supply for everyone, they will be bought out by investors and rented out.
+Building more housing of all types is the way out.
+
+You can read more at the [Edmonton Journal](https://edmontonjournal.com/opinion/columnists/opinion-rezoning-in-garneau-will-improve-housing-options-for-everyone).
