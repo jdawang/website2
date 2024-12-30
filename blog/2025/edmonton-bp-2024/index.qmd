@@ -1,5 +1,6 @@
 ---
 title: "Zoning By-Law Renewal: One Year Review"
+draft: true
 date: "2025-01-01"
 author: "Jacob Dawang"
 categories: [housing, transit, edmonton]
