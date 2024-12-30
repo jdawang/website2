@@ -18,7 +18,7 @@ blog/**/renv/lock/
 blog/**/renv/python/
 blog/**/renv/sandbox/
 blog/**/renv/staging/
-
+**/index_files/**
 
 
 /.luarc.json
