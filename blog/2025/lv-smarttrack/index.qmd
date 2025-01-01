@@ -1,0 +1,248 @@
+---
+title: "Liberty Village SmartTrack Station"
+description: "What does the data say about Toronto City Council's decision to defund the King-Liberty SmartTrack station?"
+date: "2025-01-01"
+categories:
+  - housing
+  - transit
+  - toronto
+execute: 
+  cache: true
+  freeze: true
+link-external-newwindow: true
+link-external-icon: false
+---
+
+In his [recent article](https://www.thestar.com/opinion/if-toronto-fails-to-deliver-this-one-piece-of-infrastructure-it-will-reveal-an-ugly/article_93ffd7a4-c48f-11ef-8b44-df0dcbc6aac7.html), Shawn Micallef argued that Toronto City Council's decision to fund the St. Clair-Old Weston and Bloor-Lansdowne stations over King-Liberty was unfair to the residents of that area. As someone who used to live in Liberty Village, I know firsthand the struggles of relying on primarily streetcars and buses to serve that area. It's why I biked around as much as I could.
+
+Can Shawn's argument be backed up by the data? I used the same method that I did for previous [blog posts on Edmonton](/blog/2023/mckernan-belgravia-station/index.qmd) to tally up how each station area has grown over the past 20 years. In short the method involves:
+
+1.  Pulling census data on the lowest-level geography possible: dissemination blocks (DBs).
+2.  Using [tongfen](https://mountainmath.github.io/tongfen/) to make common geographies across censuses.
+3.  Taking the DBs that are more than 50% covered by the area defined by a circle with 800m radius from the station.
+4.  Calculate on!
+
+::: callout-note
+I decided to leave out East Harbour as this is a station in a mostly new neighbourhood and will serve as a big interchange station. This distinguishes East Harbour from Bloor-Lansdowne, St. Clair-Old Weston, and King-Liberty.
+:::
+
+```{r}
+#| label: libraries
+
+library(tidyverse)
+library(sf)
+library(mountainmathHelpers)
+library(tongfen)
+library(gt)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path=Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key=Sys.getenv("NEXTZEN_API_KEY")
+)
+```
+
+```{r}
+#| label: data
+
+toronto_borders <- read_sf("../../2023/bc-tod-toronto/data/toronto-boundary-wgs84/citygcs_regional_mun_wgs84.shp")
+
+crs <- lambert_conformal_conic_at(toronto_borders)
+toronto_borders <- st_transform(toronto_borders, crs) %>%
+  st_boundary()
+
+transit_stops <- read_sf("../../2023/bc-tod-toronto/data/GIS_Data_-_Future_Transit_Network_-_2023-05-12/RTP_POINTS.shp") %>%
+  rename_all(str_to_lower) %>%
+  filter(
+    location_n %in% c("King-Liberty", "Bloor-Lansdowne", "St. Clair-Old Weston")
+  ) %>%
+  st_transform(crs)
+
+transit_areas <- st_buffer(transit_stops, units::set_units(800, "m"))
+
+census_years <- seq(2001, 2021, 5)
+meta <- purrr::map(
+  census_years,
+  function(y) meta_for_additive_variables(paste0("CA",substr(y,3,4)), c("Population","Dwellings"))
+) %>%
+  bind_rows()
+# census_data <- get_tongfen_ca_census(
+#   regions=list(CSD="3520005"),  # Toronto CSD
+#   meta=meta,
+#   level="DB",
+#   base_geo="CA21",
+#   crs=crs
+# )
+
+census_data <- read_rds("data/census_toronto.rds")
+```
+
+```{r}
+prep_census_station_data <- function(.stop_name_short) {
+  station_area <- transit_areas %>%
+    filter(
+      str_to_lower(location_n) == str_to_lower(.stop_name_short)
+    )
+
+  census_overlap_any <- census_data %>%
+    st_filter(station_area) %>%
+    mutate(a=st_area(.) %>% as.numeric) %>%
+    mutate(ai=st_area(st_intersection(.,station_area)) %>% as.numeric)
+
+  census <- census_overlap_any %>%
+    filter(ai / a > 0.5) %>%
+    mutate(
+      population_growth=Population_CA21 - Population_CA01,
+      population_growth_pct=replace_na(Population_CA21 / Population_CA01 - 1, 0),
+      dwellings_growth=Dwellings_CA21 - Dwellings_CA01,
+      dwellings_growth_pct=replace_na(Dwellings_CA21 / Dwellings_CA01 - 1, 0),
+      location_n=.stop_name_short
+    )
+  return(census)
+}
+
+census_station_data <- map(
+  c("King-Liberty", "Bloor-Lansdowne", "St. Clair-Old Weston"),
+  prep_census_station_data
+) %>%
+  bind_rows()
+```
+
+Put it all together and we get the station areas and DBs shown in @fig-data-demonstration.
+
+```{r}
+#| label: fig-data-demonstration
+#| fig-cap: "Station areas and dissemination blocks included"
+
+ggplot(census_station_data) + 
+  geom_sf(fill="#663f5f") + 
+  geom_sf(data=st_boundary(transit_areas), colour="red", linewidth=1.1) + 
+  geom_water() + 
+  geom_roads(
+    transform=function(d) filter(d, kind %in% c("major_road", "highway"))
+  ) + 
+  theme_minimal() +
+  theme(
+    panel.grid=element_blank(), 
+    axis.text = element_blank(), 
+    axis.ticks = element_blank()
+  ) + 
+  labs(
+    title="SmartTrack station areas and DBs included",
+    caption="Jacob Dawang, data StatCan census, Metrolinx"
+  )
+```
+
+Now that we have census data for each station, we can start by looking at what's the current situation. @tbl-current-pop shows that the number of people living within walking distance of the defunded King-Liberty station is way higher than the other two. So are the number of dwellings.
+
+```{r}
+#| label: tbl-current-pop
+#| tbl-cap: "Population and dwellings of SmartTrack stations, 2021"
+
+census_station_data %>%
+  st_drop_geometry() %>%
+  mutate(Station=fct_relevel(location_n, c("Bloor-Lansdowne", "St. Clair-Old Weston", "King-Liberty"))) %>%
+  summarize(
+    `Population 2021`=sum(Population_CA21),
+    `Dwellings 2021`=sum(Dwellings_CA21),
+    .by=Station
+  ) %>%
+  arrange(Station) %>%
+  gt() %>%
+  fmt_integer() %>%
+  tab_source_note("Jacob Dawang, data StatCan census, Metrolinx")
+```
+
+We can also look at growth over the past 20 years. @fig-abs-change-bar shows the absolute change in dwellings and population. King-Liberty is the station that has grown the most, by a monumental amount, whereas Bloor-Lansdowne has seen negative growth and St. Clair-Old Weston has barely grown.
+
+```{r}
+#| label: fig-abs-change-bar
+#| fig-cap: "Absolute change in dwellings and population of SmartTrack station areas"
+
+cumulative_change <- census_station_data %>%
+  pivot_longer(
+    matches("Population|Dwellings"),
+    names_pattern="^(.+)_CA(\\d{2})$",
+    names_to=c("Metric", "Year"),
+    values_to="value"
+  ) %>%
+  filter(!is.na(Metric)) %>%
+  mutate(Year=glue::glue("20{Year}")) %>%
+  st_drop_geometry() %>%
+  filter(Year %in% c(2001, 2021)) %>%
+  group_by(location_n, Metric, Year) %>%
+  summarize(value=sum(value), .groups="drop_last") %>%
+  mutate(
+    lag_value=lag(value, order_by=Year),
+    Period="Cum. 2001-2021",
+    Change=value - lag_value,
+    Change_pct = value / lag_value - 1
+  ) %>%
+  ungroup() %>%
+  filter(Year != 2001)
+
+yoy_change <- census_station_data %>%
+  pivot_longer(
+    matches("Population|Dwellings"),
+    names_pattern="^(.+)_CA(\\d{2})$",
+    names_to=c("Metric", "Year"),
+    values_to="value"
+  ) %>%
+  filter(!is.na(Metric)) %>%
+  mutate(Year=glue::glue("20{Year}")) %>%
+  st_drop_geometry() %>%
+  group_by(location_n, Metric, Year) %>%
+  summarize(value=sum(value), .groups="drop_last") %>%
+  mutate(
+    lag_value=lag(value, order_by=Year),
+    Period=glue::glue("{lag(Year, order_by=Year)}-{Year}"),
+    Change=value - lag_value,
+    Change_pct = value / lag_value - 1
+  ) %>%
+  ungroup() %>%
+  filter(Year != 2001)
+
+bind_rows(yoy_change, cumulative_change) %>%
+  mutate(location_n=fct_relevel(location_n, c("Bloor-Lansdowne", "St. Clair-Old Weston", "King-Liberty"))) %>%
+  ggplot() +
+  geom_col(aes(x=Period, y=Change, fill=location_n), position=position_dodge()) +
+  facet_wrap(vars(Metric)) +
+  scale_fill_discrete(guide=guide_legend(position="bottom")) +
+  scale_y_continuous(labels=scales::label_comma()) +
+  labs(
+    title="Absolute change in dwellings and population of SmartTrack station areas",
+    subtitle="2001-2021",
+    y="Change",
+    x=NULL,
+    fill="Station",
+    caption="Jacob Dawang, data StatCan census, Metrolinx"
+) + 
+  theme(axis.text.x = element_text(angle = 30, hjust=1))
+```
+
+For those who prefer percent changes, @fig-rel-change-bar shows that.
+
+```{r}
+#| label: fig-rel-change-bar
+#| fig-cap: "Relative change in dwellings and population of SmartTrack station areas"
+
+bind_rows(yoy_change, cumulative_change) %>%
+  mutate(location_n=fct_relevel(location_n, c("Bloor-Lansdowne", "St. Clair-Old Weston", "King-Liberty"))) %>%
+  ggplot(aes(x=Period, y=Change_pct)) +
+  geom_col(aes(fill=location_n), position=position_dodge()) +
+  facet_wrap(vars(Metric)) +
+  scale_fill_discrete(guide=guide_legend(position="bottom")) +
+  scale_y_continuous(labels=scales::label_percent()) +
+  labs(
+    title="Relative change in dwellings and population of SmartTrack station areas",
+    subtitle="2001-2021",
+    y="Change",
+    x=NULL,
+    fill="Station",
+    caption="Jacob Dawang, data StatCan census, Metrolinx"
+) + theme(axis.text.x = element_text(angle = 30, hjust=1))
+```
+
+Putting it all together, I would say that it is unfair that King-Liberty is a station chosen to be defunded, when its station area has the most people within walking distance and has seen the most growth over the past 20 years. Some argue that Liberty Village has Exhibition station, but the station is actually a good walk from where most of the population lives. Not to mention that Bloor-Lansdowne has had a subway station for decades. But City Council chose to go ahead with that station anyways, despite it decreasing in population over the past 20 years and currently having 10,000 less people than King-Liberty within walking distance.
+
+I guess Toronto the mediocre has to live up to its name somehow.
