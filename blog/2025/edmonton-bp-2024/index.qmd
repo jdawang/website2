@@ -1,18 +1,19 @@
 ---
 title: "Zoning By-Law Renewal: One Year Review"
-draft: true
-date: "2025-01-01"
+date: "2025-01-04"
 author: "Jacob Dawang"
 categories: [housing, transit, edmonton]
 description: "Edmonton's housing policy continued its march forward this past year with the new zoning by-law renewal coming into effect and district plans in force. Let's take a look at where and what type of homes are being built in this new policy regime."
 format:
   html:
     code-fold: true
+link-external-newwindow: true
+link-external-icon: false
 ---
 
 ## Background
 
-In 2023, Edmonton City Council approved a complete rewrite of the zoning by-law, called the zoning by-law renewal (ZBR). ZBR was overwhelming a good pro-housing policy. It vastly simplified the number of standard zones, removed [restrictive zoning overlays](/blog/2023/edmonton-mature-neighbourhoods) applied to the most in-demand neighbourhoods, and allowed building up to 8 units at a height of 10.5m on any residential lot in the city[^1]. ZBR came into force on January 1, 2024.
+In 2023, Edmonton City Council approved a complete rewrite of the zoning by-law, called the zoning by-law renewal (ZBR). ZBR was overwhelming a good pro-housing policy. It vastly simplified the number of standard zones, removed [restrictive zoning overlays](/blog/2023/edmonton-mature-neighbourhoods/index.qmd) applied to the most in-demand neighbourhoods, and allowed building up to 8 units at a height of 10.5m on any residential lot in the city[^1]. ZBR came into force on January 1, 2024.
 
 [^1]: Number of units allowed is still dependent on lot size. The base zone in the "mature" neighbourhoods is RS. The new neighbourhoods have more permissive base zones that allow more height and more units per lot.
 
@@ -74,7 +75,7 @@ mature_neighbourhood <- read_sf("data/Mature Neighbourhoods_20241222.geojson") %
 
 henday <- read_sf("data/henday.geojson")
 
-bp <- read_sf("data/General Building Permits_20241219/geo_export_dd48f9e3-18d9-4ef9-b234-f344abac731c.shp")
+bp <- read_sf("data/General Building Permits_20250101/geo_export_8b0d195f-4e0c-41ca-a629-304f2d5a824e.shp")
 
 crs <- lambert_conformal_conic_at(bp)
 henday <- st_transform(henday, crs)
@@ -189,7 +190,8 @@ bp <- bp %>%
         neighbourhood %in% c(
           "THE HAMPTONS, GRANVILLE",
           "RUTHERFORD, RUTHERFORD",
-          "THE UPLANDS, RIVER'S EDGE"
+          "THE UPLANDS, RIVER'S EDGE",
+          "ELLERSLIE INDUSTRIAL"
         ) ~ "Outside Henday",
         neighbourhood == "ELSINORE, ELSINORE" ~ "Between mature and Henday",
         neighbourhood == "CENTRAL MCDOUGALL, QUEEN MARY PARK" ~ "Mature",

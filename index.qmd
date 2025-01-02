@@ -6,18 +6,17 @@ repo-actions: false
 about:
   template: jolla
   links:
-    - icon: twitter
-      text: "@jacoobaloo"
-      href: https://twitter.com/jacoobaloo
+    - text: "{{< iconify fa6-brands:bluesky >}}  @jacobdawang.com"
+      href: "https://bsky.app/profile/jacobdawang.com"
     - icon: github
       text: jdawang
       href: https://github.com/jdawang
+    - icon: twitter
+      text: "@jacoobaloo"
+      href: https://twitter.com/jacoobaloo
     - icon: linkedin
-      text: LinkedIn
+      text: jacob-dawang
       href: https://www.linkedin.com/in/jacob-dawang/
-    - icon: mastodon
-      text: "@jacoobaloo@mstdn.ca"
-      href: "https://mstdn.ca/@jacoobaloo"
     - icon: envelope
       text: jacob@jacobdawang.com
       href: "mailto:jacob@jacobdawang.com"
