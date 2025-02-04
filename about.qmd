@@ -8,7 +8,7 @@ repo-actions: false
 ::: {layout="[[1,1], [1,1]]"}
 ![After biking to Niagara Falls](files/go_train_bike.jpg)
 
-![My fiancée and myself in Jasper](files/hiking.jpg)
+![My fiancée and myself in Death Valley, about to be hit by a snowstorm](files/hiking.jpg)
 
 ![Climbing at the Niagara Glen](files/climbing.jpg)
 
