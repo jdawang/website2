@@ -5,14 +5,14 @@ repo-actions: false
 
 ## Hi, I'm Jacob. Nice to meet you!
 
-::: {layout="[[1,1], [1]]"}
-
+::: {layout="[[1,1], [1,1]]"}
 ![After biking to Niagara Falls](files/go_train_bike.jpg)
 
-![My partner and myself in Jasper](files/hiking.jpg)
+![My fiancée and myself in Jasper](files/hiking.jpg)
 
 ![Climbing at the Niagara Glen](files/climbing.jpg)
 
+![My fiancée and myself on our engagement shoot](files/engagement.jpg)
 :::
 
 I'm a data scientist at Capital One Canada. Currently, I'm on the central tools team where I develop and maintain our suite of internal libraries used to build models. Previously, I worked on the customer acquisitions team, where I built our core risk and account-level valuations models used to decide whether and how much credit to lend to customers.
