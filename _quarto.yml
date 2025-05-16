@@ -35,7 +35,7 @@ website:
         href: blog.xml
   page-footer:
     center: |
-      {{< fa regular copyright >}} 2023 Jacob Dawang
+      {{< fa regular copyright >}} 2025 Jacob Dawang
       {{< fa brands creative-commons >}} {{< fa brands creative-commons-by >}} {{< fa brands creative-commons-sa >}} {{< fa brands creative-commons-nc >}} [(CC BY-NC-SA 4.0)](http://creativecommons.org/licenses/by-nc-sa/4.0/)<br>
       Powered by [Quarto](https://quarto.org/)<br>
 
@@ -45,5 +45,6 @@ format:
       light: [cosmo, custom_styles.scss]
       dark: [cosmo, custom_styles_dark.scss]
     toc: false
+    respect-user-color-scheme: true
 
 editor: visual

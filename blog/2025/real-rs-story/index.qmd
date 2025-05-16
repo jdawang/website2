@@ -1,0 +1,934 @@
+---
+title: "The RS zoning story they don't tell you"
+date: "2025-05-16"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning]
+description: "Ah, here we go again. A deeper look at the RS zone that seems to perenially be in the news. How much housing supply is being delivered, and how fast are mature neighbourhoods really changing?"
+link-external-newwindow: true
+link-external-icon: false
+---
+
+On June 3, City of Edmonton administration will bring forward reports on potential adjustments to the zoning by-law. For those of you unfamiliar, in 2023, Edmonton City Council approved a complete rewrite of the zoning by-law, called the zoning by-law renewal (ZBR). ZBR was overwhelming a good pro-housing policy. It vastly simplified the number of standard zones, removed [restrictive zoning overlays](/blog/2023/edmonton-mature-neighbourhoods/index.qmd) applied to the most in-demand neighbourhoods, and allowed building up to 8 units at a height of 10.5m on any residential lot in the city, subject to 75m^2^ lot area per unit. ZBR came into force on January 1, 2024.
+
+I'm worried. Councillors like [Andrew Knack and Michael Janz](https://andrewknack.ca/blog/infill-in-edmonton) (according to Knack) are looking to make changes to zoning that amount to adding more requirements to developments in the lowest-density RS zone that covers most of Edmonton's oldest "mature" neighbourhoods. These include requiring lot coverage for mid-block developments to be split between the primary home and a backyard home (like 28% primary and 17% backyard for example), and restricting lot splitting to create more than 8 units. Essentially, a complication of the rules at best, and a downzoning at worst.
+
+Clearly, these proposed changes are in response to the neverending slinging of classic exaggerations by the latest reincarnation of anti-infill group Better Infill, with claims like there is "an avalanche of infill". It's an an attempt at a compromise in an election year. I believe pursuing these councillors' proposed changes is deeply misguided. Like the Liberals [exempting heating oil from the carbon tax](https://www.cbc.ca/news/canada/carbon-tax-home-heating-1.7010767), I predict that this "compromise" will win them precisely zero votes, because the opposition to ZBR is simply not based in reality, fact, or data. There is no amount of change to the zoning by-law, barring repealing it in its entirety that will appease Better Infill and friends.
+
+In this post, I take another look at Edmonton's building permit data, including data until May 9, 2025, to show that ZBR is a huge success, that the opposition
+
+## tl;dr
+
+ZBR is working. It's making a big difference that has accelerated in the first four months of 2025. We are getting closer to our goal of repopulating mature neighbourhoods, driven by the increase in gentle density through multiplexes/row homes.
+
+At the same time, despite putting up impressive unit count numbers, mature neighbourhoods are still densifying slowly and gradually. If you live in a home in the RS zone in a mature neighbourhood, at current rates, it will be an average of 29 years until a home on your block develops into five or more units. The home next to you? An average of 140 years to develop into five or more units. [Of course this differs by neighbourhood, which I elaborate on in the rest of the blog post.]{.aside} Practically, this means that when you walk around mature neighbourhoods, you will almost surely encounter a larger multiplex, but they will not be anywhere near the norm for decades.
+
+Finally, the data suggest the tweaks that Councillors Knack and Janz want to make could be disruptive to the form of infill multiplexes that has been most successful by far: a single building on the lot with an equal number of secondary suites as primary units. Why? There have been a grand total of 0 fiveplexes to eightplexes with backyard homes so far in 2024 and 2025.
+
+```{r}
+#| label: libaries
+
+library(tidyverse)
+library(sf)
+library(gt)
+library(mountainmathHelpers)
+library(gganimate)
+library(tidytransit)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path=Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key=Sys.getenv("NEXTZEN_API_KEY")
+)
+```
+
+## Data
+
+```{r}
+#| label: data
+
+mature_neighbourhood <- read_sf("data/Mature Neighbourhoods_20241222.geojson") %>% 
+  rename(neighbourhood=neighbourh) %>%
+  filter(neighbourhood != "Downtown")
+
+henday <- read_sf("data/henday.geojson")
+
+bp <- read_sf("data/General Building Permits_20250510/")
+assessment <- read_sf("data/Property Information (Current Calendar Year)_20250510.geojson")
+
+crs <- lambert_conformal_conic_at(bp)
+henday <- st_transform(henday, crs)
+mature_neighbourhood <- st_transform(mature_neighbourhood, crs)
+
+bp <- bp %>%
+  st_transform(crs) %>%
+  select(-c(count, latitude, longitude, time_permi, time_issue, row_id, date_permi, neighbourh, permit_num), -contains("location")) %>%
+  rename(
+    construction_value=constructi,
+    month_number=month_numb, 
+    building_type=building_t, 
+    units_added=units_adde, 
+    neighbourhood=neighbou_2, 
+    job_category=job_catego, 
+    job_description=job_descri, 
+    date_issued=date_issue
+  ) %>%
+  filter(
+    units_added >= 1,
+    building_type %in% c(
+      "Apartment (310)",
+      "Apartment Condos (315)",
+      "Apartments (310)",
+      "Backyard House (110)",
+      "Duplex (210)",
+      "Garden Suite (110)",
+      "Mixed Use (522)",
+      "Row House (330)",
+      "Row House Condo (335)",
+      "Row House Condos (335)",
+      "Row Houses (330)",
+      "Semi-Detached Condo (215)",
+      "Semi-Detached House (210)",
+      "Single Detached Condo (115)",
+      "Single Detached House (110)"
+    ),
+    work_type != "(04) Excavation",
+    #job_category != "Commercial Final"
+  )  %>%
+  mutate(
+    project_type=fct(
+      case_when(
+        (building_type %in% c("Backyard House (110)", "Garden Suite (110)")) ~ "Backyard House",
+        (str_detect(work_type, coll("new", ignore_case=TRUE))) & (units_added == 1) ~ "New SFH",
+         (work_type %in% c(
+        "(03) Interior Alterations", 
+        "(03) Exterior Alterations", 
+        "(07) Add Suites to Single Dwelling", 
+        "(08) Add Suites to Multi-Dwelling", 
+        "(09) Convert Non-Res to Residential",
+        "(02) Addition",
+        "(12) Move Building on to Site"
+      )) ~ "Addition/Conversion",
+      between(units_added, 2, 4) ~ "Duplex to Fourplex",
+      between(units_added, 5, 8) ~ "Fiveplex to Eightplex",
+      str_detect(building_type, fixed("Row House", ignore_case=TRUE)) ~ "9+ Row House",
+      units_added >= 9 ~ "9+ Apartment",
+      .default = "I messed up"
+    ),
+    levels=c("New SFH", "Addition/Conversion", "Backyard House", "Duplex to Fourplex", "Fiveplex to Eightplex", "9+ Row House", "9+ Apartment")
+  ),
+  mature_neighbourhood=st_contains(st_union(mature_neighbourhood), ., sparse=FALSE)[1,] & !st_is_empty(.) & !is.na(neighbourhood),
+  outside_henday=!st_contains(henday, ., sparse=FALSE)[1,] & !st_is_empty(.),
+  between_henday_mature=!st_is_empty(.) & !mature_neighbourhood & !outside_henday,
+  secondary_suite_desc=str_trim(
+    str_extract(
+      job_description,
+      regex("(\\d|a)? ?secondary suites?", ignore_case=TRUE)
+    )
+  ),
+  num_secondary_suites=case_when(
+    str_detect(secondary_suite_desc, "\\d") ~ as.numeric(str_extract(secondary_suite_desc, "\\d")),
+    str_to_lower(secondary_suite_desc) %in% c(
+      "a secondary suite",
+      "secondary suite"
+    ) ~ 1,
+    str_to_lower(secondary_suite_desc) %in% c(
+      "secondary suites",
+      "a secondary suites"
+    )~ units_added / 2,
+    .default=0
+  ),
+  has_backyard_home=(
+    str_detect(job_description, regex("garden suites?", ignore_case=TRUE))
+    | str_detect(job_description, regex("backyard houses?", ignore_case=TRUE))
+  )
+) %>%
+  mutate(
+    mature_neighbourhood=(
+      mature_neighbourhood | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., mature_neighbourhood), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    outside_henday=(
+      outside_henday | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., outside_henday), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    between_henday_mature=(
+      between_henday_mature | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., between_henday_mature), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    neighbourhood_type=fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "THE HAMPTONS, GRANVILLE",
+          "RUTHERFORD, RUTHERFORD",
+          "THE UPLANDS, RIVER'S EDGE",
+          "ELLERSLIE INDUSTRIAL"
+        ) ~ "Outside Henday",
+        neighbourhood %in% c(
+          "ELSINORE, ELSINORE",
+          "MICHAELS PARK",
+          "BRANDER GARDENS",
+          "PILOT SOUND AREA WEST PORTION, MCCONACHIE",
+          "YOUNGSTOWN INDUSTRIAL"
+        ) ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "CENTRAL MCDOUGALL, QUEEN MARY PARK",
+          "WOODCROFT",
+          "BOYLE STREET",
+          "ELMWOOD"
+        )~ "Mature",
+        address %in% c(
+          "8944 - 145 STREET NW",
+          "11216 - 122 STREET NW",
+          "9509 - 99B STREET NW"
+        ) ~ "Mature",
+        .default = NA_character_
+    ),
+    levels=c("Downtown", "Mature", "Between mature and Henday", "Outside Henday")
+    ),
+    date_issued=as_date(date_issued)
+  )
+
+
+assessment <- assessment %>%
+  st_transform(crs) %>%
+  filter(!is.na(house_number), !is.na(longitude), !is.na(latitude)) %>%
+  mutate(
+    mature_neighbourhood=st_contains(st_union(mature_neighbourhood), ., sparse=FALSE)[1,] & !st_is_empty(.) & !is.na(neighbourhood),
+    outside_henday=!st_contains(henday, ., sparse=FALSE)[1,] & !st_is_empty(.),
+    between_henday_mature=!st_is_empty(.) & !mature_neighbourhood & !outside_henday
+  ) %>%
+  mutate(
+    mature_neighbourhood=(
+      mature_neighbourhood | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., mature_neighbourhood), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    outside_henday=(
+      outside_henday | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., outside_henday), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    between_henday_mature=(
+      between_henday_mature | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., between_henday_mature), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    neighbourhood_type=fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "THE HAMPTONS, GRANVILLE",
+          "RUTHERFORD, RUTHERFORD",
+          "THE UPLANDS, RIVER'S EDGE",
+          "ELLERSLIE INDUSTRIAL"
+        ) ~ "Outside Henday",
+        neighbourhood == "ELSINORE, ELSINORE" ~ "Between mature and Henday",
+        neighbourhood == "CENTRAL MCDOUGALL, QUEEN MARY PARK" ~ "Mature",
+        .default = NA_character_
+    ),
+    levels=c("Downtown", "Mature", "Between mature and Henday", "Outside Henday")
+    )
+  )
+
+future_lrt_stops <- read_sf("../../2024/all-lrt-stops-updated/data/future_lrt_stops.geojson") %>%
+  mutate(status="future")
+
+lrt_stops <- read_gtfs("../../2024/all-lrt-stops/data/ca-alberta-edmonton-transit-system-gtfs-714.zip") %>%
+  gtfs_as_sf() %>%
+  filter_stops(
+    route_ids=c("021R", "022R", "023R"),
+    service_ids=filter(.$calendar, date=="2023-11-09") %>% pull(service_id)
+  ) %>%
+  mutate(
+    stop_name=case_match(
+      stop_name,
+      "Bay Enterprise Square  Station" ~ "Bay Enterprise Square Station",
+      "Churchill Stop" ~ "Churchill Station",
+      .default=stop_name
+    ),
+    status="existing"
+  ) %>%
+  filter(!(stop_name %in% c("Metro Line JTTl Track", "DL MacDonald Platform", "NAIT Station"))) %>%
+  bind_rows(
+    future_lrt_stops %>%
+      filter(!(stop_name %in% c("Castle Downs Station", "145 Ave Station", "137 Ave Station", "132 Ave Station")))
+  ) %>%
+  st_transform(crs) %>%
+  group_by(stop_name, status) %>%
+  summarize(geometry=st_union(geometry), .groups="drop") %>%
+  mutate(geometry=st_centroid(geometry), stop_name_short=str_remove(stop_name, " (Stop|Station)"))
+```
+
+Edmonton's [general building permit data](https://data.edmonton.ca/Urban-Planning-Economy/General-Building-Permits/24uj-dj8v/about_data) has tracked building permits since 2009. It contains columns for building type, work type, location, units added, and more for each building permit. There is a bit of cleaning I do, as you can see in the code. In short, I:[The cleaning is mostly the same as my previous post on building permits, except I downloaded 2025 data as well and added a few more variables for backyard home and secondary suite combinations.]{.aside}
+
+-   Include building permits that added at least 1 unit. Building permits that did not add units of housing are not adding to the supply of housing. However, this does exclude demolitions (negative `units_added`), which I am just accepting as a limitation of this blog post.
+
+-   Include building types in a list of specified residential types (e.g. Apartment, Row House, Single Detached, Mixed Use). It's possible that I'm counting commercial units in mixed use.
+
+-   Create a new variable *project type* that categorizes building permits as follows, in increasing order of density:
+
+    -   New single-family home (SFH).
+
+    -   Backyard house (i.e. garden suite). Note that a garden suite can have multiple units in it.
+
+    -   Addition/conversion - either additions to existing buildings that add housing or conversion of commercial to residential.
+
+    -   Duplex to fourplex.
+
+    -   Fiveplex to eightplex.
+
+    -   Rowhouses of 9 or more units.
+
+    -   Apartments of 9 or more units.
+
+-   Add location categories for *neighbourhood type* which take the following values: downtown (literally just the downtown neighbourhood), mature, between mature and Henday, and outside the Henday.
+
+-   Extract the number of secondary suites constructed from the job description.
+
+-   Create an indicator for whether a backyard home was created, extracted from the job description.
+
+Both the *project type* and *neighbourhood type* categories are arbitrary, but I think they strike a good balance for examining the effect of ZBR, the ascendance of backyard homes, and Edmonton's development pattern.
+
+Rowhouses are the biggest question. Depending on how they are constructed, stacked or not, with secondary suites or not, they are sort of between single-family homes and multiplex apartments. In this case, I decided to split them out from 9+ apartments, but to keep them with the multiplexes.
+
+One question is how to adjust the 2025 data, which is only available until May 9 to a yearly run rate, as building permits may not be issued uniformly throughout the year. I chose a simple adjustment to multiply both number of permits, and total units added by 3, as @fig-ratios show that it would be a reasonable historical choice.
+
+```{r}
+#| label: fig-ratios
+#| fig-cap: "Ratio of building permits and units issued after May 10 to May 9 and before"
+ratios <- bp %>%
+  st_drop_geometry() %>%
+  filter(
+    neighbourhood_type == "Mature",
+    year <= 2024,
+    between(units_added, 2, 8)
+  ) %>%
+  mutate(
+    period=(month_number < 5) | ((month_number == 5) & (day(date_issued) <= 9))
+  ) %>%
+  group_by(year, period) %>%
+  summarize(n_permits = n(), total_units_added=sum(units_added)) %>%
+  arrange(desc(period)) %>%
+  mutate(
+    permits = n_permits / lag(n_permits),
+    units = total_units_added / lag(total_units_added)
+  ) %>%
+  filter(!is.na(permits)) %>%
+  select(year, permits, units) %>%
+  pivot_longer(c(permits, units), names_to="ratio")
+
+ggplot(ratios) +
+  geom_line(aes(x=year, y=value, colour=ratio), linewidth=1) +
+  labs(
+    title="Ratio of building permits and units issued after May 10 to May 9 and before",
+    caption="Jacob Dawang, City of Edmonton Open Data",
+    colour="",
+    y="ratio"
+  )
+```
+
+Edmonton's [property assessment data](https://data.edmonton.ca/City-Administration/Property-Assessment-Data-Current-Calendar-Year-/q7d6-ambg/about_data) contains one row per property assessed with columns for neighbourhood, and zoning. I use it to count the number of properties in mature neighbourhoods under RS zoning.
+
+## ZBR is working
+
+First, let's look at the timeseries of building permits and units added by project type. @fig-project-type-raw-bp shows the raw number of building permits issued and @fig-project-type-units-added shows the corresponding number of units added. Also as requested, I have added an area plots that sum up to the total.
+
+::: callout-important
+The axes are different between the line plots and area plots below.
+:::
+
+::: panel-tabset
+## Number of building permits
+
+```{r}
+#| label: fig-project-type-raw-bp
+#| fig-cap: "Number of building permits by project type, 2009-2025"
+#| fig-subcap: ["Line plot", "Area plot"]
+
+project_type_dist <- bp %>%
+  st_drop_geometry() %>%
+  group_by(year, project_type, .drop=FALSE) %>% 
+  summarize(total=sum(units_added), num_projects=n(), .groups="drop") %>%
+  mutate(
+    total=ifelse(year == 2025, total * 3, total),
+    num_projects=ifelse(year == 2025, num_projects * 3, num_projects)
+  )
+
+ggplot(project_type_dist) +
+  geom_line(aes(x=year, y=num_projects, colour=project_type), linewidth=1) +
+  scale_colour_viridis_d(option="magma") +
+  scale_y_continuous(limits=c(0, 5000)) +
+  labs(
+    title="Number of building permits by project type",
+    subtitle="Building permits 2009-2025",
+    colour="Project type",
+    y="Number of Building Permits",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  ) +
+  theme_dark()
+
+ggplot(project_type_dist) +
+  geom_area(aes(x=year, y=num_projects, fill=project_type)) +
+  scale_fill_viridis_d(option="magma") +
+  labs(
+    title="Number of building permits by project type",
+    subtitle="Building permits 2009-2025",
+    fill="Project type",
+    y="Number of Building Permits",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  ) +
+  theme_dark()
+```
+
+## Total units added
+
+```{r}
+#| label: fig-project-type-units-added
+#| fig-cap: "Total number of units by project type, 2009-2025"
+#| fig-subcap: ["Line plot", "Area plot"]
+#| classes: preview-image
+
+ggplot(project_type_dist) +
+  geom_line(aes(x=year, y=total, colour=project_type), linewidth=1) +
+  scale_colour_viridis_d(option="magma") +
+  scale_y_continuous(limits=c(0, 6000)) +
+  labs(
+    title="Total number of units by project type",
+    subtitle="Building permits 2009-2025",
+    colour="Project type",
+    y="Total number of units",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  ) +
+  theme_dark()
+
+ggplot(project_type_dist) +
+  geom_area(aes(x=year, y=total, fill=project_type)) +
+  scale_fill_viridis_d(option="magma") +
+  labs(
+    title="Total number of units by project type",
+    subtitle="Building permits 2009-2025",
+    fill="Project type",
+    y="Total number of units",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  ) +
+  theme_dark()
+```
+:::
+
+Comparing the two figures, we can see that the raw number of building permits and the number of units added are two separate concepts. Single-family homes have a building permit for each building, whereas a large apartment building could have a single building permit for hundreds of units. Multiplexes are somewhere in the middle. They are starting to produce a significant amount of units, but the number of properties affected remains low.
+
+Let's take a look at *where* these multiplexes are being built in @fig-units-added-nbhd-prj-type.
+
+```{r}
+#| label: fig-units-added-nbhd-prj-type
+#| fig-cap: "Total number of units by neighbourhood and project type"
+#| fig-subcap: ["Line plot", "Area plot"]
+
+bp %>%
+  st_drop_geometry() %>%
+  group_by(year, neighbourhood_type, project_type, .drop=FALSE) %>% 
+  summarize(total=sum(units_added), num_projects=n(), .groups="drop") %>%
+  mutate(
+    total=ifelse(year == 2025, total * 3, total),
+    num_projects=ifelse(year == 2025, num_projects * 3, num_projects)
+  ) %>%
+ggplot() +
+  geom_line(aes(x=year, y=total, colour=project_type), linewidth=1) +
+  scale_colour_viridis_d(option="magma") +
+  labs(
+    title="Total number of units by neighbourhood and project type",
+    subtitle="Building permits 2009-2025",
+    colour="Project type",
+    x="Year",
+    y="Total number of units",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  ) +
+  theme_dark() +
+  facet_wrap(vars(neighbourhood_type))
+
+bp %>%
+  st_drop_geometry() %>%
+  group_by(year, neighbourhood_type, project_type, .drop=FALSE) %>% 
+  summarize(total=sum(units_added), num_projects=n(), .groups="drop") %>%
+  mutate(
+    total=ifelse(year == 2025, total * 3, total),
+    num_projects=ifelse(year == 2025, num_projects * 3, num_projects)
+  ) %>%
+ggplot() +
+  geom_area(aes(x=year, y=total, fill=project_type)) +
+  scale_fill_viridis_d(option="magma") +
+  labs(
+    title="Total number of units by neighbourhood and project type",
+    subtitle="Building permits 2009-2025",
+    fill="Project type",
+    x="Year",
+    y="Total number of units",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  ) +
+  theme_dark() +
+  facet_wrap(vars(neighbourhood_type))
+```
+
+There is an increase in housing production in mature neighbourhoods, to the point where it's only about a thousand units less than outside the Henday. Driving this increase is 9+ apartments and fiveplex to eightplexes. Remember, increasing the number of fiveplex to eightplexes was one of the main goals of ZBR. Clearly a ton of people had latent demand to live in this kind of housing in mature neighbourhoods and this is enabling more people to live the kind of life they want to live at a more affordable price.
+
+Besides the direct effect on housing supply and affordability, ZBR is enabling Edmonton to achieve city-building goals. 2025 is a record year for building housing near transit. That means less people driving, less congestion, and less greenhouse gas emissions.
+
+```{r}
+#| label: fig-lrt-stop-distance-existing
+#| fig-cap: "Cumulative distribution of units added by distance from the closest existing LRT stop"
+#| fig-subcap: ["Existing stations only", "Existing, funded, and under construction"]
+bp %>% 
+  filter(
+    !st_is_empty(.),
+    (month_number <= 4) | ((month_number == 5) & day(date_issued) <= 9)
+  ) %>%
+  mutate(
+    distance_from_lrt=apply(
+        st_distance(
+          ., 
+          filter(lrt_stops, status == "existing"), 
+        ),
+        1,
+        min
+    ) / 1000,
+  ) %>%
+  group_by(year) %>%
+  arrange(distance_from_lrt, .by_group=TRUE) %>%
+  mutate(
+    cum_units=cumsum(units_added),
+    ecdf_values=cum_units / sum(units_added)
+  ) %>%
+  ggplot() +
+  geom_step(aes(x=distance_from_lrt, y=ecdf_values, colour=factor(year)), linewidth=0.8) + 
+  scale_colour_viridis_d(option="magma", guide=guide_legend(ncol=2)) +
+  scale_x_continuous(limits=c(0, 14), oob=scales::squish) +
+  theme_dark() +
+  labs(
+    title="Cumulative distribution of units added by distance from closest LRT stop",
+    subtitle="Existing only, building permits 2009-2025, Jan 1 to May 9",
+    x="Distance from closest LRT stop (km)",
+    y="Cumulative proportion of units added",
+    colour="Year",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+
+bp %>% 
+  filter(
+    !st_is_empty(.),
+    (month_number <= 4) | ((month_number == 5) & day(date_issued) <= 9)
+  ) %>%
+  mutate(
+    distance_from_lrt=apply(
+        st_distance(
+          ., 
+          lrt_stops, 
+        ),
+        1,
+        min
+    ) / 1000,
+  ) %>%
+  group_by(year) %>%
+  arrange(distance_from_lrt, .by_group=TRUE) %>%
+  mutate(
+    cum_units=cumsum(units_added),
+    ecdf_values=cum_units / sum(units_added)
+  ) %>%
+  ggplot() +
+  geom_step(aes(x=distance_from_lrt, y=ecdf_values, colour=factor(year)), linewidth=0.8) + 
+  scale_colour_viridis_d(option="magma", guide=guide_legend(ncol=2)) +
+  scale_x_continuous(limits=c(0, 14), oob=scales::squish) +
+  theme_dark() +
+  labs(
+    title="Cumulative distribution of units added by distance from closest LRT stop",
+    subtitle="Existing, under construction, and funded, building permits 2009-2025, Jan 1 to May 9",
+    x="Distance from closest LRT stop (km)",
+    y="Cumulative proportion of units added",
+    colour="Year",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+Despite the impressive number of units built, it's important to remember the number of permits (i.e. redeveloped or affected properties) for this increase in housing produced is nowhere near as significant as shown in @fig-permits-nbhd-prj-type, especially in mature neighbourhoods. That's the magic of density: a few hundred redeveloped properties out of the thousands in our most desirable neighbourhoods can make all the difference for people.
+
+```{r}
+#| label: fig-permits-nbhd-prj-type
+#| fig-cap: "Number of permits by neighbourhood and project type"
+
+bp %>%
+  st_drop_geometry() %>%
+  group_by(year, neighbourhood_type, project_type, .drop=FALSE) %>% 
+  summarize(total=sum(units_added), num_projects=n(), .groups="drop") %>%
+  mutate(
+    total=ifelse(year == 2025, total * 3, total),
+    num_projects=ifelse(year == 2025, num_projects * 3, num_projects)
+  ) %>%
+ggplot() +
+  geom_line(aes(x=year, y=num_projects, colour=project_type), linewidth=1) +
+  scale_colour_viridis_d(option="magma") +
+  labs(
+    title="Number of permits by neighbourhood and project type",
+    subtitle="Building permits 2009-2025",
+    colour="Project type",
+    x="Year",
+    y="Number of permits",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  ) +
+  theme_dark() +
+  facet_wrap(vars(neighbourhood_type))
+```
+
+## Your neighbourhood is changing, very slowly
+
+Let's take the concept of permits versus units even further. Using the property assessment data, we can estimate the probability that any given property in the RS zone, in any given year, redevelops into a fiveplex or more, the amount of density that was newly allowed by ZBR. It's the number of building permits for fiveplexes to eightplexes divided by the number of assessed properties. We can estimate this probability for mature neighbourhoods on aggregate as well as for each individual neighbourhood.
+
+Let's assume you live in a house in a mature neighbourhood, in the RS zone and you have no intention of destroying the integrity of your neighbourhood by redeveloping your house into a multiplex. With a couple more assumptions, and basic probability distributions[^1], we can calculate:
+
+[^1]: For those interested, you can assume that properties redeveloping are independent events. Let the probability that any given property redevelops in any given year be $p_0$, the total number of homes in the area you're interested in be $n$ (2 homes next to you or 9 on your block), and $X$ the number of homes that redevelop in any given year. Then $X \sim \textrm{Binomial}(n, p)$. The probability that at least one home develops in any given year is then $p_1=1-P(X=0)$, which can be computed easily.\
+    For the second part, we consider the number of years until the event "at least one home develops", call this $Y$. Then, $Y \sim \textrm{Geometric}(p_1)$. With this, we can calculate the expected number of years until "at least one home of $n$ redevelops" as $E(Y) = \frac{1}{p_1}$.
+
+1.  The probability that at least one of your two neighbouring homes redevelops into a fiveplex or more.
+2.  The probability that at least one of the nine other homes on your block on your side of the street redevelops into a fiveplex or more.
+3.  The probability that at least one of the 19 other homes on your block on both sides of the street redevelops into a fiveplex or more.
+4.  For each of 1-3, the expected number of years until that event occurs.
+
+@tbl-probs shows that on average, you will be waiting over a century until the home next to you redevelops. On your block, over three decades. Slow, incremental, gentle density, whatever you want to call it, this is the reality. Not an "avalanche of infill" or the "destruction of the integrity of our neighbourhoods". Practically, this means that over the upcoming years, you will come across multiplexes in mature neighbourhoods, but it will be a long time until they are commonplace.
+
+```{r}
+#| label: tbl-probs
+#| tbl-cap: "Expected number of years until at least one property redevelops into a fiveplex or more, in mature neighbourhoods, in the RS zone"
+
+n_plexes_mature_rs <- bp %>%
+  st_drop_geometry() %>%
+  filter(
+    neighbourhood_type == "Mature",
+    zoning == "RS",
+    year==2025,
+    between(units_added, 5, 8)
+  ) %>%
+  summarize(n_permits=n() * 3, total_units_added=sum(units_added) * 3) %>%
+  ungroup() %>%
+  pull(n_permits)
+
+n_assessed_mature_rs <- assessment %>%
+  st_drop_geometry() %>%
+  filter(
+    neighbourhood_type == "Mature",
+    zoning == "RS",
+  ) %>%
+  distinct(house_number, street_name) %>%
+  nrow()
+p_develop <- n_plexes_mature_rs / n_assessed_mature_rs
+p_neighbouring <- pbinom(0, 2, p_develop, lower.tail=FALSE)
+p_block <- pbinom(0, 9, p_develop, lower.tail=FALSE)
+p_block_both_sides <- pbinom(0, 19, p_develop, lower.tail=FALSE)
+
+gt(
+  tribble(
+    ~event, ~prob, ~expected,
+    "A neighbouring property", p_neighbouring, 1 / p_neighbouring,
+    "A property on the same block, on the same side of the street", p_block, 1 / p_block,
+    "A property on the same block, on either side of the street", p_block_both_sides, 1 / p_block_both_sides
+  )
+) |>
+  fmt_percent(columns=prob, decimals=1) |>
+  fmt_number(columns=expected, decimals=0) |>
+  cols_label(event="Redevelops into a fiveplex or more", prob="Probability in any given year", expected="Expected number of years until occurence") |>
+  tab_source_note("Jacob Dawang, City of Edmonton Open Data") |>
+  tab_header("Expected number of years until at least one property redevelops into a fiveplex or more, in mature neighbourhoods, in the RS zone",  "Mature neighbourhoods, RS zone") |>
+  opt_stylize(style=5)
+```
+
+Of course, the rate of redevelopment differs by neighbourhood, so I conducted the same exercise using the number of permits per neighbourhood and the number of assessed properties per neighbourhood. You can see the results in @fig-years-until-develop-by-nbhd, @fig-years-until-develop-block, and @fig-years-until-develop-block-both-sides. Yes, some neighbourhoods are seeing more infill than others, but to put it in perspective, in the vast majority of mature neighbourhoods, it will be more than a decade until the first fiveplex or more is developed on your side of the street.
+
+::: callout-important
+The axes are on different scales in the bar charts below.
+:::
+
+```{r}
+#| label: compute-prob-by-nbhd
+n_plexes_mature_rs_by_nbhd <- bp %>%
+  st_drop_geometry() %>%
+  filter(
+    neighbourhood_type == "Mature",
+    zoning == "RS",
+    year==2025,
+    between(units_added, 5, 8)
+  ) %>%
+  group_by(neighbourhood) %>%
+  summarize(n_permits=n() * 3, total_units_added=sum(units_added) * 3) %>%
+  ungroup()
+
+n_assessed_mature_rs_by_nbhd <- assessment %>%
+  st_drop_geometry() %>%
+  filter(
+    neighbourhood_type == "Mature",
+    zoning == "RS",
+  ) %>%
+  distinct(house_number, street_name, .keep_all=TRUE) %>%
+  group_by(neighbourhood) %>%
+  summarize(n_properties=n())
+
+prob_develop_by_nbhd <- n_assessed_mature_rs_by_nbhd %>%
+  left_join(n_plexes_mature_rs_by_nbhd, by=join_by(neighbourhood)) %>%
+  replace_na(list(n_permits=0, total_units_added=0)) %>%
+  mutate(
+    p_develop=n_permits / n_properties,
+    p_neighbouring=pbinom(0, 2, p_develop, lower.tail=FALSE),
+    p_block=pbinom(0, 10, p_develop, lower.tail=FALSE),
+    p_block_both_sides=pbinom(0, 20, p_develop, lower.tail=FALSE)
+  ) %>%
+  mutate(
+    years_until_neighbouring=1 / p_neighbouring,
+    years_until_block=1 / p_block,
+    years_until_block_both_sides=1 / p_block_both_sides
+  )
+```
+
+::: panel-tabset
+## Neighbouring
+
+```{r}
+#| label: fig-years-until-develop-by-nbhd
+#| fig-cap: "Average number of years until at least one neighbouring RS zoned property is developed into a fiveplex or more"
+#| fig-height: 11
+
+prob_develop_by_nbhd %>% 
+  filter(p_neighbouring > 0) %>%
+  mutate(neighbourhood=str_to_title(neighbourhood)) %>%
+  ggplot() +
+  geom_col(aes(y=fct_reorder(neighbourhood, years_until_neighbouring, .desc=TRUE), x=years_until_neighbouring), fill="#663f5f") +
+  labs(
+    x="Number of years until development",
+    y="Neighbourhood",
+    title="Average number of years until\nat least one neighbouring RS zoned property is developed",
+    subtitle="Into a fiveplex or more",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+## Same block, same side of street
+
+```{r}
+#| label: fig-years-until-develop-block
+#| fig-cap: "Average number of years until at least one RS zoned property on the same block, on the same side of the street is developed"
+#| fig-height: 11
+
+prob_develop_by_nbhd %>% 
+  filter(p_neighbouring > 0) %>%
+  mutate(neighbourhood=str_to_title(neighbourhood)) %>%
+  ggplot() +
+  geom_col(aes(y=fct_reorder(neighbourhood, years_until_block, .desc=TRUE), x=years_until_block), fill="#663f5f") +
+  labs(
+    x="Number of years until development",
+    y="Neighbourhood",
+    title="Average number of years until at least one RS zoned property\non the same block, on the same side of the street is developed",
+    subtitle="Into a fiveplex or more",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+## Same block, either side of street
+
+```{r}
+#| label: fig-years-until-develop-block-both-sides
+#| fig-cap: "Average number of years until at least one RS zoned property on the same block, on either side of the street is developed"
+#| fig-height: 11
+
+
+prob_develop_by_nbhd %>% 
+  filter(p_neighbouring > 0) %>%
+  mutate(neighbourhood=str_to_title(neighbourhood)) %>%
+  ggplot() +
+  geom_col(aes(y=fct_reorder(neighbourhood, years_until_block_both_sides, .desc=TRUE), x=years_until_block_both_sides), fill="#663f5f") +
+  labs(
+    x="Number of years until development",
+    y="Neighbourhood",
+    title="Average number of years until at least one RS zoned property\non the same block, on either side of the street is developed",
+    subtitle="Into a fiveplex or more",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+:::
+
+## Bad tweaks
+
+Finally, let's assess the tweaks that Councillor Knack has suggested. As a refresher, these include requiring lot coverage for mid-block developments to be split between the primary home and a backyard home (like 28% primary and 17% backyard for example), and restricting lot splitting to create more than 8 units. Unfortunately, I don't have the data to evaluate the second proposal.
+
+Onto the first proposal. Since it would further regulate the form of buildings, let's take a look at the form of multi-unit developments in the RS zone in mature neighbourhoods. For this analysis, I include all permits from January 1, 2024 until May 9, 2025. @tbl-prop-backyard-home breaks down how many developments included a backyard home and how many did not.
+
+```{r}
+#| label: tbl-prop-backyard-home
+#| tbl-cap: "Number of permits by units added and whether it includes a backyard home, mature neighbourhoods, RS zone, January 1, 2024 to May 9, 2025"
+
+
+bp %>%
+  st_drop_geometry() %>%
+  filter(
+    year >= 2024, 
+    zoning == "RS", 
+    neighbourhood_type == "Mature",
+    between(units_added, 2, 8)
+  ) %>%
+  mutate(backyard_home_desc=ifelse(has_backyard_home, "with", "without")) %>%
+  count(units_added, backyard_home_desc) %>%
+  pivot_wider(
+    id_cols=units_added, 
+    names_from=backyard_home_desc,
+    values_from=n,
+    values_fill=0
+  ) %>%
+  mutate(pct_with=with / (with + without), pct_without=1 - pct_with) %>%
+  gt(rowname_col="units_added") %>%
+  tab_stubhead("Units added") %>%
+  cols_merge_n_pct(with, pct_with) %>%
+  cols_merge_n_pct(without, pct_without) %>%
+  cols_label(
+    with="Permits with a backyard home",
+    without="Permits without a backyard home",
+  ) %>%
+  fmt_percent(c(pct_with, pct_without), decimals=0) %>%
+  opt_stylize(style=5) %>%
+  tab_header(
+    title="Number of permits by units added and whether it includes a backyard home",
+    subtitle="Mature neighbourhoods, RS zone, January 1, 2024 to May 9, 2025"
+  ) %>%
+  tab_source_note("Jacob Dawang, City of Edmonton Open Data")
+```
+
+First thing to note: the distribution of multiplex permits is not uniform. There are masses at two, four, and eight units added. The mass at eight units, the maximum number of units permitted, indicates that the current zoning by-law is likely still restricting supply in the RS zone. If that maximum was not in place, we would likely see developmets with more units built. Essentially, the latent demand to live in mature neighbourhoods still outstrips supply permitted.
+
+The second thing to note is that while a lot of developments with two units added have backyard homes (likely a single-family home with a garden suite), no developments with five or more units added had a garden suite. That is, they were all multiplexes built under a single primary building, exactly what Knack's proposal would disallow. It's possible that not all multiplex developments are using the full 45% lot coverage maximum, but this should not be the default assumption. Builders are incentivized to maximize floor area and lot coverage as it maximizes indoor living space for future residents, especially given Edmonton winters.
+
+So what form are these multiplex developments taking? @tbl-secondary-suites sheds some light, by cross-tabulating the number of secondary suites in each building permit by the number of units added. Notice that the most common number of secondary suites for each row lies along the diagonal, where the number of secondary suites is half the number of units created in the permit.
+
+```{r}
+#| label: tbl-secondary-suites
+#| tbl-cap: "Number of building permits by units added and number of secondary suites, mature neighbourhoods, RS zone, January 1, 2024 to May 9, 2025"
+
+bp %>%
+  st_drop_geometry() %>%
+  filter(
+    year >= 2024, 
+    zoning == "RS", 
+    neighbourhood_type == "Mature",
+    between(units_added, 2, 8)
+  ) %>%
+  mutate(backyard_home_desc=ifelse(has_backyard_home, "with", "without")) %>%
+  count(units_added, num_secondary_suites) %>%
+  group_by(units_added) %>%
+  mutate(pct=n / sum(n)) %>%
+  ungroup() %>%
+  arrange(units_added) %>%
+  pivot_wider(
+    id_cols=units_added, 
+    names_from=num_secondary_suites,
+    values_from=c(n, pct),
+    values_fill=0
+  ) %>%
+  select(units_added, n_0, n_1, n_2, n_3, n_4, pct_0, pct_1, pct_2, pct_3, pct_4) %>%
+  gt(rowname_col="units_added") %>%
+  fmt_percent(starts_with("pct")) %>%
+  cols_merge_n_pct(n_0, pct_0) %>%
+  cols_merge_n_pct(n_1, pct_1) %>%
+  cols_merge_n_pct(n_2, pct_2) %>%
+  cols_merge_n_pct(n_3, pct_3) %>%
+  cols_merge_n_pct(n_4, pct_4) %>%
+  tab_stubhead("Units added") %>%
+  tab_spanner("Number of secondary suites", columns=n_0:n_4) %>%
+  cols_label(
+    units_added="Units added", n_0=0, n_1=1, n_2=2, n_3=3, n_4=4
+  ) %>%
+  fmt_percent(starts_with("pct"), decimals=0) %>%
+  opt_stylize(style=5) %>%
+  tab_header(
+    title="Number of building permits by units added and number of secondary suites in permit",
+    subtitle="Mature neighbourhoods, RS zone, January 1, 2024 to May 9, 2025"
+  ) %>%
+  tab_source_note("Jacob Dawang, City of Edmonton Open Data") %>%
+  tab_style(style=cell_text(weight="bold"), locations=cells_body(columns=n_1, rows=c(1, 2))) %>%
+  tab_style(style=cell_text(weight="bold"), locations=cells_body(columns=n_2, rows=c(3, 4))) %>%
+  tab_style(style=cell_text(weight="bold"), locations=cells_body(columns=n_3, rows=c(5, 6))) %>%
+  tab_style(style=cell_text(weight="bold"), locations=cells_body(columns=n_4, rows=7))
+```
+
+Putting everything together with the data on backyard homes, the most common configuration for multiplexes is a single primary building with an equal number of secondary suites as primary units. In other words, forcing lot coverage splitting between a primary and backyard home has the potential to disrupt hundreds of multiplex permits per year, representing a couple thousand new homes.
+
+This shows the danger in making these pinpoint changes to zoning that undermine its flexibility and permissiveness. ZBR is still in its infancy, and its preliminary success relies almost entirely on a form of housing that Knack's proposal would disallow. If council is serious about increasing the amount of infill, decreasing suburban sprawl, and getting people riding transit, then it should vote down Knack's proposal and anything similar.
+
+## Conclusions
+
+-   ZBR has succeeded beyond what I expected. In 2025, we're seeing strong growth of the housing stock in mature neighbourhoods, thanks to the increase in fiveplexes to eightplexes.
+
+-   There is strong latent demand from people to live in mature neighbourhoods that was clearly restricted by the previous zoning by-law. The current zoning by-law is probably still restrictive, as evidenced by the mass of permits of exactly 8 units, the maximum permitted. Many more people want to live in mature neighbourhoods than we're allowing, even today.
+
+-   ZBR's effects are allowing more people to live near mass transit, giving people a way to live without a car or car-lite.
+
+-   Mature neighbourhoods continue to change slowly under ZBR. Multiplexes will become more common in mature neighbourhoods, but only over multiple decades. There is absolutely no evidence to back up claims of "an avalanche of infill" from groups like Better Infill.
+
+-   Most multiplexes, and 100% of fiveplexes to eightplexes do not have a backyard home. The most common form for multiplexes is one primary building with an equal number of secondary suites to primary homes.
+
+-   Councillor Knack's proposal to require sharing of the maximum lot coverage between a primary building and a backyard home could be disruptive to the success of ZBR. Effectively, it would disallow the dominant form of housing driving the success of ZBR in increasing housing supply.
+
+## Postscript rant
+
+While the proposal of tweaks to the zoning by-law comes from a place of wanting to compromise in order to save the whole thing, I doubt it would placate any opposition whatsoever. The people opposing ZBR won't be satisfied until it's gone completely because their opposition is not based in any fact or data whatsoever. Neighbourhood change through multiplexes is already barely noticeable in the vast majority of neighbourhoods. Making it even less noticeable will not change a thing, because people cannot tell the difference between 20 years until the first multiplex is built on their block and 30 years.
+
+Just because some vocal people are yelling about their neighbourhood going from degrowth to *some extremely slow positive* growth, doesn't mean their concerns are valid. If council approves Knack's changes or similar, it will be a compromise that pleases no one: neither the urbanist cohort, myself included who would hate to see ZBR undermined, nor the opposition who will not perceive any change whatsoever, as the current pace of infill is already barely perceptible.

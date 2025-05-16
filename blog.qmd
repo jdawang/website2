@@ -9,7 +9,6 @@ listing:
   filter-ui: true
   fields:
     - date
-    - reading-time
     - title
     - description
     - image
