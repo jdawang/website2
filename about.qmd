@@ -8,20 +8,22 @@ repo-actions: false
 ::: {layout="[[1,1], [1,1]]"}
 ![After biking to Niagara Falls](files/go_train_bike.jpg)
 
-![My fiancée and myself in Death Valley, about to be hit by a snowstorm](files/hiking.jpg)
+![My wife and myself in Death Valley, about to be hit by a snowstorm](files/hiking.jpg)
 
 ![Climbing at the Niagara Glen](files/climbing.jpg)
 
-![My fiancée and myself on our engagement shoot](files/engagement.jpg)
+![My wife and myself on our engagement shoot](files/engagement.jpg)
 :::
 
-I'm a data scientist at Capital One Canada. Currently, I'm on the central tools team where I develop and maintain our suite of internal libraries used to build models. Previously, I worked on the customer acquisitions team, where I built our core risk and account-level valuations models used to decide whether and how much credit to lend to customers.
+I'm a data scientist at Capital One Canada.
+Currently, I lead our acquisitions risk model team that builds the models that predict risk of default for incoming applications.
+Previously, I worked on our central tooling team, building inner-source and open-source Python libraries to make it easier for data scientists to do their work.
 
 Before I started at Capital One, I studied at the University of Waterloo (UW), where I graduated in 2019 with a bachelor of mathematics, with a major in statistics and a minor in economic theory.
 
 ## Edmonton via Montreal, Waterloo, Toronto and Ottawa
 
-I am currently based in Edmonton, having followed my partner here for her medical residency. I have luckily had the chance to experience living in a handful of cities across Canada. While I'm originally from Montreal, the co-op program at UW allowed me live in a few cities during my studies:
+I am currently based in Edmonton, having followed my wife here for her medical residency. I have luckily had the chance to experience living in a handful of cities across Canada. While I'm originally from Montreal, the co-op program at UW allowed me live in a few cities during my studies:
 
 -   Waterloo, while studying and working as a NSERC research assistant.
 -   Ottawa, while working as a research intern at Statistics Canada.
