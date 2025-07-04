@@ -30,7 +30,7 @@ options(
 
 ## Data
 
-I bring in census data, but otherwise, the data is the same as [last blog post](/blog/2025/real-rs-story/index.qmd), except building permits are pulled as of July 3.
+I bring in census data, but otherwise, the data is the same as [last blog post](/blog/2025/real-rs-story/index.qmd), except building permits are from January 1, 2024 to July 3, 2025.
 
 ```{r}
 #| label: data
@@ -323,7 +323,7 @@ population_change <- population_2021 %>%
 
 ## Plexes are being built near transit
 
-7-8plexes are being built near transit. 43% of 7-8plexes were built within 800m of a current or future LRT stop. This may not seem like a high percentage, but compared to past years, and all other types of housing, this is a big improvement. Historically, less than 25% of all housing in Edmonton has been built within 800m of LRT. @fig-cum-dist-transit shows how much closer to transit 7-8plexes are being built.
+Since 2024, 7-8plexes are being built near transit. 43% of 7-8plexes were built within 800m of a current or future LRT stop. This may not seem like a high percentage, but compared to past years, and all other types of housing, this is a big improvement. Historically, less than 25% of all housing in Edmonton has been built within 800m of LRT. @fig-cum-dist-transit shows how much closer to transit 7-8plexes are being built.
 
 ```{r}
 #| label: fig-cum-dist-transit
@@ -366,7 +366,7 @@ bp %>%
 
 I found in my [last blog post](/blog/2025/real-rs-story/index.qmd) that neighbourhoods were still changing really slowly. Here, I have brought in population change data from 1971-2021 to show that the neibhourhods seeing a handful of rowhouse development have lost upwards of 30% of their population over the last 50 years.
 
-I want to highlight some neighbourhoods that have been focused on in the news, by council, and by administration in @tbl-selected-nbhds. You'd think by some of the rhetoric coming out of Crestwood, for example, that there are 7-8 plexes going up everywhere, on every block, next to everyone. But, this is misleading. Only 4 out of 886 properties have been permitted to redevelop, only 0.46% of the properties! Meanwhile, Crestwood has lost 30% of its population over the last 50 years. Crestwood is not at risk of overdevelopment: it is in fact the exact opposite. Crestwood needs more housing to repopulate the neighbourhood.
+I want to highlight some neighbourhoods that have been focused on in the news, by council, and by administration in @tbl-selected-nbhds. You'd think by some of the rhetoric coming out of Crestwood, for example, that there are 7-8 plexes going up everywhere, on every block, next to everyone. But, this is misleading. Only 4 out of 886 properties have been permitted to redevelop into these 7-8plexes since the zoning by-law renewal, only 0.46% of the properties! Meanwhile, Crestwood has lost 30% of its population over the last 50 years. Crestwood is not at risk of overdevelopment: it is in fact the exact opposite. Crestwood needs more housing to repopulate the neighbourhood.
 
 ```{r}
 #| label: compute-prob-by-nbhd
@@ -444,4 +444,3 @@ reactable(
   )
 )
 ```
-
