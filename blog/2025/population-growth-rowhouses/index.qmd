@@ -1,0 +1,446 @@
+---
+title: "Population growth and rowhouse growth in selected neighbourhoods"
+date: "2025-07-04"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning]
+description: "Quick profiles of selected neigbhourhoods and how much 7-8 unit rowhouse development they're really seeing."
+link-external-newwindow: true
+link-external-icon: false
+---
+
+Here's another look at rowhouses, their distance from transit, and their actual prevalence in neighbourhoods. Turns out, 8 unit rowhouses are not popping up everywhere, they're actually quite rare when compared to the number of properties in each neighbourhood. When they are built, they're built much closer to transit than other types of housing in other neighbourhoods. Furthermore, the neighbourhoods that have been a focus in the media, and council have lost upwards of 30% of their population since 1971. There is not a risk of overdevelopment. Rather there is a risk of underpopulation for the services, accessibility, and desirability of these neighbourhoods.
+
+```{r}
+#| label: libaries
+
+library(tidyverse)
+library(sf)
+library(gt)
+library(mountainmathHelpers)
+library(gganimate)
+library(tidytransit)
+library(reactable)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path=Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key=Sys.getenv("NEXTZEN_API_KEY")
+)
+```
+
+## Data
+
+I bring in census data, but otherwise, the data is the same as [last blog post](/blog/2025/real-rs-story/index.qmd), except building permits are from January 1, 2024 to July 3, 2025.
+
+```{r}
+#| label: data
+
+mature_neighbourhood <- read_sf("data/Mature Neighbourhoods_20241222.geojson") %>% 
+  rename(neighbourhood=neighbourh) %>%
+  filter(neighbourhood != "Downtown")
+
+henday <- read_sf("data/henday.geojson")
+
+bp <- read_sf("data/General Building Permits_20250703/")
+assessment <- read_sf("data/Property Information (Current Calendar Year)_20250510.geojson")
+
+crs <- lambert_conformal_conic_at(bp)
+henday <- st_transform(henday, crs)
+mature_neighbourhood <- st_transform(mature_neighbourhood, crs)
+
+bp <- bp %>%
+  st_transform(crs) %>%
+  select(-c(count, latitude, longitude, time_permi, time_issue, row_id, date_permi, neighbourh, permit_num), -contains("location")) %>%
+  rename(
+    construction_value=constructi,
+    month_number=month_numb, 
+    building_type=building_t, 
+    units_added=units_adde, 
+    neighbourhood=neighbou_2, 
+    job_category=job_catego, 
+    job_description=job_descri, 
+    date_issued=date_issue
+  ) %>%
+  filter(
+    units_added >= 1,
+    building_type %in% c(
+      "Apartment (310)",
+      "Apartment Condos (315)",
+      "Apartments (310)",
+      "Backyard House (110)",
+      "Duplex (210)",
+      "Garden Suite (110)",
+      "Mixed Use (522)",
+      "Row House (330)",
+      "Row House Condo (335)",
+      "Row House Condos (335)",
+      "Row Houses (330)",
+      "Semi-Detached Condo (215)",
+      "Semi-Detached House (210)",
+      "Single Detached Condo (115)",
+      "Single Detached House (110)"
+    ),
+    work_type != "(04) Excavation",
+    #job_category != "Commercial Final"
+  )  %>%
+  mutate(
+    project_type=fct(
+      case_when(
+        (building_type %in% c("Backyard House (110)", "Garden Suite (110)")) ~ "Backyard House",
+        (str_detect(work_type, coll("new", ignore_case=TRUE))) & (units_added == 1) ~ "New SFH",
+         (work_type %in% c(
+        "(03) Interior Alterations", 
+        "(03) Exterior Alterations", 
+        "(07) Add Suites to Single Dwelling", 
+        "(08) Add Suites to Multi-Dwelling", 
+        "(09) Convert Non-Res to Residential",
+        "(02) Addition",
+        "(12) Move Building on to Site"
+      )) ~ "Addition/Conversion",
+      between(units_added, 2, 4) ~ "Duplex to Fourplex",
+      between(units_added, 5, 8) ~ "Fiveplex to Eightplex",
+      str_detect(building_type, fixed("Row House", ignore_case=TRUE)) ~ "9+ Row House",
+      units_added >= 9 ~ "9+ Apartment",
+      .default = "I messed up"
+    ),
+    levels=c("New SFH", "Addition/Conversion", "Backyard House", "Duplex to Fourplex", "Fiveplex to Eightplex", "9+ Row House", "9+ Apartment")
+  ),
+  mature_neighbourhood=st_contains(st_union(mature_neighbourhood), ., sparse=FALSE)[1,] & !st_is_empty(.) & !is.na(neighbourhood),
+  outside_henday=!st_contains(henday, ., sparse=FALSE)[1,] & !st_is_empty(.),
+  between_henday_mature=!st_is_empty(.) & !mature_neighbourhood & !outside_henday,
+  secondary_suite_desc=str_trim(
+    str_extract(
+      job_description,
+      regex("(\\d|a)? ?secondary suites?", ignore_case=TRUE)
+    )
+  ),
+  num_secondary_suites=case_when(
+    str_detect(secondary_suite_desc, "\\d") ~ as.numeric(str_extract(secondary_suite_desc, "\\d")),
+    str_to_lower(secondary_suite_desc) %in% c(
+      "a secondary suite",
+      "secondary suite"
+    ) ~ 1,
+    str_to_lower(secondary_suite_desc) %in% c(
+      "secondary suites",
+      "a secondary suites"
+    )~ units_added / 2,
+    .default=0
+  ),
+  has_backyard_home=(
+    str_detect(job_description, regex("garden suites?", ignore_case=TRUE))
+    | str_detect(job_description, regex("backyard houses?", ignore_case=TRUE))
+  )
+) %>%
+  mutate(
+    mature_neighbourhood=(
+      mature_neighbourhood | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., mature_neighbourhood), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    outside_henday=(
+      outside_henday | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., outside_henday), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    between_henday_mature=(
+      between_henday_mature | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., between_henday_mature), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    neighbourhood_type=fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "THE HAMPTONS, GRANVILLE",
+          "RUTHERFORD, RUTHERFORD",
+          "THE UPLANDS, RIVER'S EDGE",
+          "ELLERSLIE INDUSTRIAL"
+        ) ~ "Outside Henday",
+        neighbourhood %in% c(
+          "ELSINORE, ELSINORE",
+          "MICHAELS PARK",
+          "BRANDER GARDENS",
+          "PILOT SOUND AREA WEST PORTION, MCCONACHIE",
+          "YOUNGSTOWN INDUSTRIAL"
+        ) ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "CENTRAL MCDOUGALL, QUEEN MARY PARK",
+          "WOODCROFT",
+          "BOYLE STREET",
+          "ELMWOOD"
+        )~ "Mature",
+        address %in% c(
+          "8944 - 145 STREET NW",
+          "11216 - 122 STREET NW",
+          "9509 - 99B STREET NW"
+        ) ~ "Mature",
+        .default = NA_character_
+    ),
+    levels=c("Downtown", "Mature", "Between mature and Henday", "Outside Henday")
+    ),
+    date_issued=as_date(date_issued)
+  )
+
+
+assessment <- assessment %>%
+  st_transform(crs) %>%
+  filter(!is.na(house_number), !is.na(longitude), !is.na(latitude)) %>%
+  mutate(
+    mature_neighbourhood=st_contains(st_union(mature_neighbourhood), ., sparse=FALSE)[1,] & !st_is_empty(.) & !is.na(neighbourhood),
+    outside_henday=!st_contains(henday, ., sparse=FALSE)[1,] & !st_is_empty(.),
+    between_henday_mature=!st_is_empty(.) & !mature_neighbourhood & !outside_henday
+  ) %>%
+  mutate(
+    mature_neighbourhood=(
+      mature_neighbourhood | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., mature_neighbourhood), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    outside_henday=(
+      outside_henday | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., outside_henday), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    between_henday_mature=(
+      between_henday_mature | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., between_henday_mature), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    neighbourhood_type=fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "THE HAMPTONS, GRANVILLE",
+          "RUTHERFORD, RUTHERFORD",
+          "THE UPLANDS, RIVER'S EDGE",
+          "ELLERSLIE INDUSTRIAL"
+        ) ~ "Outside Henday",
+        neighbourhood == "ELSINORE, ELSINORE" ~ "Between mature and Henday",
+        neighbourhood == "CENTRAL MCDOUGALL, QUEEN MARY PARK" ~ "Mature",
+        .default = NA_character_
+    ),
+    levels=c("Downtown", "Mature", "Between mature and Henday", "Outside Henday")
+    )
+  )
+
+future_lrt_stops <- read_sf("../../2024/all-lrt-stops-updated/data/future_lrt_stops.geojson") %>%
+  mutate(status="future")
+
+lrt_stops <- read_gtfs("../../2024/all-lrt-stops/data/ca-alberta-edmonton-transit-system-gtfs-714.zip") %>%
+  gtfs_as_sf() %>%
+  filter_stops(
+    route_ids=c("021R", "022R", "023R"),
+    service_ids=filter(.$calendar, date=="2023-11-09") %>% pull(service_id)
+  ) %>%
+  mutate(
+    stop_name=case_match(
+      stop_name,
+      "Bay Enterprise Square  Station" ~ "Bay Enterprise Square Station",
+      "Churchill Stop" ~ "Churchill Station",
+      .default=stop_name
+    ),
+    status="existing"
+  ) %>%
+  filter(!(stop_name %in% c("Metro Line JTTl Track", "DL MacDonald Platform", "NAIT Station"))) %>%
+  bind_rows(
+    future_lrt_stops %>%
+      filter(!(stop_name %in% c("Castle Downs Station", "145 Ave Station", "137 Ave Station", "132 Ave Station")))
+  ) %>%
+  st_transform(crs) %>%
+  group_by(stop_name, status) %>%
+  summarize(geometry=st_union(geometry), .groups="drop") %>%
+  mutate(geometry=st_centroid(geometry), stop_name_short=str_remove(stop_name, " (Stop|Station)"))
+
+wards <- read_csv("data/Neighbourhoods_and_Wards_20250703.csv") %>%
+  select(neighbourhood=`Neighbourhood Name`, Ward) %>%
+  mutate(neighbourhood=str_to_upper(neighbourhood))
+population_1971 <- read_csv("data/population_1971.csv") %>%
+  select(neighbourhood=Neighbourhood, n_1971=`Total - Age`)
+population_2021 <- read_csv("data/population_2021.csv") %>%
+  distinct() %>%
+  rename(neighbourhood=NEIGHBOURHOOD, n_2021=`2021`)
+
+population_change <- population_2021 %>%
+  full_join(population_1971, by=join_by(neighbourhood)) %>%
+  left_join(wards, by=join_by(neighbourhood)) %>%
+  replace_na(list(n_2021=0, n_1971=0)) %>%
+  mutate(pct_change=n_2021 / n_1971 - 1)
+```
+
+## Plexes are being built near transit
+
+Since 2024, 7-8plexes are being built near transit. 43% of 7-8plexes were built within 800m of a current or future LRT stop. This may not seem like a high percentage, but compared to past years, and all other types of housing, this is a big improvement. Historically, less than 25% of all housing in Edmonton has been built within 800m of LRT. @fig-cum-dist-transit shows how much closer to transit 7-8plexes are being built.
+
+```{r}
+#| label: fig-cum-dist-transit
+#| fig-cap: Cumulative distribution of units added by distance from closest LRT stop
+bp %>% 
+  filter(!st_is_empty(.), year>=2024) %>%
+  mutate(
+    distance_from_lrt=apply(
+        st_distance(
+          ., 
+          lrt_stops, 
+        ),
+        1,
+        min
+    ) / 1000,
+    plex=ifelse(between(units_added, 7, 8) & zoning=="RS", "7-8plex in RS", "All others")
+  ) %>%
+  group_by(plex) %>%
+  arrange(distance_from_lrt, .by_group=TRUE) %>%
+  mutate(
+    cum_units=cumsum(units_added),
+    ecdf_values=cum_units / sum(units_added)
+  ) %>%
+  ggplot() +
+  geom_step(aes(x=distance_from_lrt, y=ecdf_values, colour=factor(plex)), linewidth=0.8) + 
+  scale_colour_viridis_d(option="magma", guide=guide_legend(ncol=2)) +
+  scale_x_continuous(limits=c(0, 14), oob=scales::squish) +
+  theme_dark() +
+  labs(
+    title="Cumulative distribution of units added by distance from closest LRT stop",
+    subtitle="Existing, under construction, and funded, building permits 2024-2025",
+    x="Distance from closest LRT stop (km)",
+    y="Cumulative proportion of units added",
+    colour="Devleopment type",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+## Not many 7-8plexes in any one neighbourhood
+
+I found in my [last blog post](/blog/2025/real-rs-story/index.qmd) that neighbourhoods were still changing really slowly. Here, I have brought in population change data from 1971-2021 to show that the neibhourhods seeing a handful of rowhouse development have lost upwards of 30% of their population over the last 50 years.
+
+I want to highlight some neighbourhoods that have been focused on in the news, by council, and by administration in @tbl-selected-nbhds. You'd think by some of the rhetoric coming out of Crestwood, for example, that there are 7-8 plexes going up everywhere, on every block, next to everyone. But, this is misleading. Only 4 out of 886 properties have been permitted to redevelop into these 7-8plexes since the zoning by-law renewal, only 0.46% of the properties! Meanwhile, Crestwood has lost 30% of its population over the last 50 years. Crestwood is not at risk of overdevelopment: it is in fact the exact opposite. Crestwood needs more housing to repopulate the neighbourhood.
+
+```{r}
+#| label: compute-prob-by-nbhd
+
+n_plexes_rs <- bp %>%
+  st_drop_geometry() %>%
+  #filter(neighbourhood %in% nbhd_list) %>%
+  group_by(neighbourhood, .drop=FALSE) %>%
+  filter(
+    zoning == "RS",
+    year>=2024,
+    between(units_added, 7, 8),
+  ) %>%
+  summarize(n_permits=n())
+
+n_assessed_rs_by_nbhd <- assessment %>%
+  st_drop_geometry() %>%
+  filter(zoning == "RS") %>%
+  distinct(house_number, street_name, .keep_all=TRUE) %>%
+  group_by(neighbourhood) %>%
+  summarize(n_properties=n())
+
+merged <- n_plexes_rs %>% 
+  left_join(n_assessed_rs_by_nbhd, by=join_by(neighbourhood)) %>% 
+  left_join(population_change, by=join_by(neighbourhood)) %>% 
+  filter(!is.na(n_properties)) %>%
+  mutate(neighbourhood=str_to_title(neighbourhood), pct_redevelop=n_permits/n_properties) %>%
+  relocate(Ward, .after=neighbourhood) %>%
+  relocate(pct_redevelop, .after=n_properties) %>%
+  rename(Neighbourhood=neighbourhood, `Number of 7-8 unit permits`=n_permits, `Total number of properties`=n_properties, `Population 2021`=n_2021, `Population 1971`=n_1971, `% change in population`=pct_change, `% of properties redeveloped into 7-8plex`=pct_redevelop)
+```
+
+```{r}
+#| label: tbl-selected-nbhds
+#| tbl-cap: Selected neighbourhood 7-8plex development profiles
+nbhd_list <- c(
+  "GLENWOOD",
+  "GROVENOR",
+  "BRITTANIA YOUNGSTOWN",
+  "INGLEWOOD",
+  "WESTMOUNT",
+  "PRINCE CHARLES",
+  "MCKERNAN",
+  "CRESTWOOD",
+  "PARKVIEW"
+)
+merged %>% filter(
+  str_to_upper(Neighbourhood) %in% nbhd_list
+) %>%
+  gt() %>%
+  fmt_integer(columns=c(`Population 2021`, `Population 1971`, `Total number of properties`)) %>%
+  fmt_percent(columns=`% change in population`,decimals=0) %>%
+  fmt_percent(columns=`% of properties redeveloped into 7-8plex`, decimals=2) %>%
+  tab_source_note("Jacob Dawang, City of Edmonton Open Data, StatCan Census") %>% 
+  tab_header("Selected neighbourhood 7-8plex development profiles") 
+```
+
+Search up your own neighbourhood in the table below.
+
+::: callout-note
+The table below only works in light mode. If you are in dark mode, please use the toggle in the upper right to change to light mode.
+:::
+
+```{r}
+#| column: page
+reactable(
+  merged,
+  searchable=TRUE,
+  striped=TRUE,
+  highlight=TRUE,
+  outlined=TRUE,
+  columns=list(
+    `% change in population`=colDef(format=colFormat(percent=TRUE, digits=0)),
+    `% of properties redeveloped into 7-8plex`=colDef(format=colFormat(percent=TRUE, digits=2))
+  )
+)
+```
