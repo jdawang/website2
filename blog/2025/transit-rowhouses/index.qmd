@@ -1,0 +1,426 @@
+---
+title: "7-8plexes in the RS zone and location near transit"
+date: "2025-07-07"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning, transit]
+description: "A quick, but deeper look at 7-8 unit multiplexes in the RS zone and where they are located in relation to transit."
+link-external-newwindow: true
+link-external-icon: false
+execute:
+  cache: false
+---
+
+Here's another look at rowhouses and their distance from transit.
+The 7-8plexes in Edmonton are built remarkably near transit, with over a majority within a 1km radius of a LRT station.
+I also include an interactive map for you to explore where the 7-8plexes are and how far they are from LRT stop.
+
+```{r}
+#| label: libaries
+
+library(tidyverse)
+library(sf)
+library(gt)
+library(mountainmathHelpers)
+library(gganimate)
+library(tidytransit)
+library(mapview)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path=Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key=Sys.getenv("NEXTZEN_API_KEY")
+)
+```
+
+## Data
+
+The data is all from the City of Edmonton Open Data and includes:
+
+- [Building permits](https://data.edmonton.ca/Urban-Planning-Economy/General-Building-Permits/24uj-dj8v/about_data) from January 1, 2024 to July 3, 2025.
+- LRT stop locations.
+- [Neighbourhood boundary and ward data](https://data.edmonton.ca/City-Administration/City-of-Edmonton-Neighbourhoods-Map-View-/wps4-8auk).
+
+```{r}
+#| label: data
+
+mature_neighbourhood <- read_sf("data/Mature Neighbourhoods_20241222.geojson") %>% 
+  rename(neighbourhood=neighbourh) %>%
+  filter(neighbourhood != "Downtown")
+
+henday <- read_sf("data/henday.geojson")
+
+bp <- read_sf("data/General Building Permits_20250703/")
+
+crs <- lambert_conformal_conic_at(bp)
+henday <- st_transform(henday, crs)
+mature_neighbourhood <- st_transform(mature_neighbourhood, crs)
+
+bp <- bp %>%
+  st_transform(crs) %>%
+  select(-c(count, latitude, longitude, time_permi, time_issue, row_id, date_permi, neighbourh, permit_num), -contains("location")) %>%
+  rename(
+    construction_value=constructi,
+    month_number=month_numb, 
+    building_type=building_t, 
+    units_added=units_adde, 
+    neighbourhood=neighbou_2, 
+    job_category=job_catego, 
+    job_description=job_descri, 
+    date_issued=date_issue
+  ) %>%
+  filter(
+    units_added >= 1,
+    building_type %in% c(
+      "Apartment (310)",
+      "Apartment Condos (315)",
+      "Apartments (310)",
+      "Backyard House (110)",
+      "Duplex (210)",
+      "Garden Suite (110)",
+      "Mixed Use (522)",
+      "Row House (330)",
+      "Row House Condo (335)",
+      "Row House Condos (335)",
+      "Row Houses (330)",
+      "Semi-Detached Condo (215)",
+      "Semi-Detached House (210)",
+      "Single Detached Condo (115)",
+      "Single Detached House (110)"
+    ),
+    work_type != "(04) Excavation",
+    #job_category != "Commercial Final"
+  )  %>%
+  mutate(
+    project_type=fct(
+      case_when(
+        (building_type %in% c("Backyard House (110)", "Garden Suite (110)")) ~ "Backyard House",
+        (str_detect(work_type, coll("new", ignore_case=TRUE))) & (units_added == 1) ~ "New SFH",
+         (work_type %in% c(
+        "(03) Interior Alterations", 
+        "(03) Exterior Alterations", 
+        "(07) Add Suites to Single Dwelling", 
+        "(08) Add Suites to Multi-Dwelling", 
+        "(09) Convert Non-Res to Residential",
+        "(02) Addition",
+        "(12) Move Building on to Site"
+      )) ~ "Addition/Conversion",
+      between(units_added, 2, 4) ~ "Duplex to Fourplex",
+      between(units_added, 5, 8) ~ "Fiveplex to Eightplex",
+      str_detect(building_type, fixed("Row House", ignore_case=TRUE)) ~ "9+ Row House",
+      units_added >= 9 ~ "9+ Apartment",
+      .default = "I messed up"
+    ),
+    levels=c("New SFH", "Addition/Conversion", "Backyard House", "Duplex to Fourplex", "Fiveplex to Eightplex", "9+ Row House", "9+ Apartment")
+  ),
+  mature_neighbourhood=st_contains(st_union(mature_neighbourhood), ., sparse=FALSE)[1,] & !st_is_empty(.) & !is.na(neighbourhood),
+  outside_henday=!st_contains(henday, ., sparse=FALSE)[1,] & !st_is_empty(.),
+  between_henday_mature=!st_is_empty(.) & !mature_neighbourhood & !outside_henday,
+  secondary_suite_desc=str_trim(
+    str_extract(
+      job_description,
+      regex("(\\d|a)? ?secondary suites?", ignore_case=TRUE)
+    )
+  ),
+  num_secondary_suites=case_when(
+    str_detect(secondary_suite_desc, "\\d") ~ as.numeric(str_extract(secondary_suite_desc, "\\d")),
+    str_to_lower(secondary_suite_desc) %in% c(
+      "a secondary suite",
+      "secondary suite"
+    ) ~ 1,
+    str_to_lower(secondary_suite_desc) %in% c(
+      "secondary suites",
+      "a secondary suites"
+    )~ units_added / 2,
+    .default=0
+  ),
+  has_backyard_home=(
+    str_detect(job_description, regex("garden suites?", ignore_case=TRUE))
+    | str_detect(job_description, regex("backyard houses?", ignore_case=TRUE))
+  )
+) %>%
+  mutate(
+    mature_neighbourhood=(
+      mature_neighbourhood | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., mature_neighbourhood), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    outside_henday=(
+      outside_henday | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., outside_henday), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    between_henday_mature=(
+      between_henday_mature | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., between_henday_mature), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    neighbourhood_type=fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "THE HAMPTONS, GRANVILLE",
+          "RUTHERFORD, RUTHERFORD",
+          "THE UPLANDS, RIVER'S EDGE",
+          "ELLERSLIE INDUSTRIAL"
+        ) ~ "Outside Henday",
+        neighbourhood %in% c(
+          "ELSINORE, ELSINORE",
+          "MICHAELS PARK",
+          "BRANDER GARDENS",
+          "PILOT SOUND AREA WEST PORTION, MCCONACHIE",
+          "YOUNGSTOWN INDUSTRIAL"
+        ) ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "CENTRAL MCDOUGALL, QUEEN MARY PARK",
+          "WOODCROFT",
+          "BOYLE STREET",
+          "ELMWOOD"
+        )~ "Mature",
+        address %in% c(
+          "8944 - 145 STREET NW",
+          "11216 - 122 STREET NW",
+          "9509 - 99B STREET NW"
+        ) ~ "Mature",
+        .default = NA_character_
+    ),
+    levels=c("Downtown", "Mature", "Between mature and Henday", "Outside Henday")
+    ),
+    date_issued=as_date(date_issued)
+  )
+
+future_lrt_stops <- read_sf("../../2024/all-lrt-stops-updated/data/future_lrt_stops.geojson") %>%
+  mutate(status="future")
+
+lrt_stops <- read_gtfs("../../2024/all-lrt-stops/data/ca-alberta-edmonton-transit-system-gtfs-714.zip") %>%
+  gtfs_as_sf() %>%
+  filter_stops(
+    route_ids=c("021R", "022R", "023R"),
+    service_ids=filter(.$calendar, date=="2023-11-09") %>% pull(service_id)
+  ) %>%
+  mutate(
+    stop_name=case_match(
+      stop_name,
+      "Bay Enterprise Square  Station" ~ "Bay Enterprise Square Station",
+      "Churchill Stop" ~ "Churchill Station",
+      .default=stop_name
+    ),
+    status="existing"
+  ) %>%
+  filter(!(stop_name %in% c("Metro Line JTTl Track", "DL MacDonald Platform", "NAIT Station"))) %>%
+  bind_rows(
+    future_lrt_stops %>%
+      filter(!(stop_name %in% c("Castle Downs Station", "145 Ave Station", "137 Ave Station", "132 Ave Station")))
+  ) %>%
+  st_transform(crs) %>%
+  group_by(stop_name, status) %>%
+  summarize(geometry=st_union(geometry), .groups="drop") %>%
+  mutate(geometry=st_centroid(geometry), stop_name_short=str_remove(stop_name, " (Stop|Station)"))
+
+wards <- read_sf("data/City of Edmonton - Neighbourhoods_20250706.geojson") %>%
+  st_transform(crs) %>%
+  select(neighbourhood=name, ward=civic_ward_name) %>%
+  mutate(neighbourhood=str_to_upper(neighbourhood))
+```
+
+## Plexes are being built near transit
+
+Since 2024, 7-8plexes in the RS zone are being built near transit.
+@fig-cum-dist-transit shows the cumulative distribution of 7-8plexes by distance from closest LRT stop, either existing, under construction, or funded.
+Summarizing the plot:
+
+- 55% of 7-8plexes in the RS zone are within 1km of a LRT stop.
+- 73% of 7-8plexes in the RS zone are within 1.5km of a LRT stop.
+- 91% of 7-8plexes in the RS zone are within 2km of a LRT stop.
+
+```{r}
+#| label: fig-cum-dist-transit
+#| fig-cap: Cumulative distribution of 7-8plexes by distance from closest LRT stop
+
+plexes_only <-  bp %>% 
+  filter(!st_is_empty(.), year>=2024, between(units_added, 7, 8), zoning == "RS") %>%
+  select(date_issued, job_description, address, neighbourhood, units_added)  %>%
+  mutate(
+    distance_from_lrt=apply(
+        st_distance(
+          ., 
+          lrt_stops, 
+        ),
+        1,
+        min
+    ) / 1000
+  ) 
+
+ecdf_transit <- plexes_only %>%
+  arrange(distance_from_lrt) %>%
+  mutate(ecdf_values=ecdf(distance_from_lrt)(distance_from_lrt))
+
+ggplot(ecdf_transit) +
+  geom_step(aes(x=distance_from_lrt, y=ecdf_values), linewidth=0.8) + 
+  scale_y_continuous(labels=scales::label_percent()) +
+  scale_colour_viridis_d(option="magma") +
+  labs(
+    title="Cumulative distribution of 7-8plexes by distance from closest LRT stop",
+    subtitle="Existing, under construction, and funded, building permits January 1 2024-July 3, 2025",
+    x="Distance from closest LRT stop (km)",
+    y="Cumulative proportion of building permits",
+    colour="Devleopment type",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+## Mapping 7-8plexes and LRT
+
+Taking a look at the map in @fig-lrt-plex-map, I just want to comment that almost all of the 7-8plexes that are causing such strife in West Edmonton are clustered around the Valley Line West extension.
+Basically all the 7-8plexes are being built a short walk, bike ride or bus ride away from a LRT station.
+So it makes sense that of course less parking is needed, because residents will be taking transit more.
+
+::: {.callout-note}
+Each 7-8plex is represented by a blue dot. The red circles indicate LRT stops. The red lines indicate the radii from the LRT stops. Dotted for 1km, dashed for 1.5km and solid for 2km.
+:::
+
+```{r}
+#| label: fig-lrt-plex-map
+#| fig-cap: Map of all 7-8 unit building permits in RS Zone and LRT stops, January 1 2024-July 3, 2025
+#| classes: "preview-image"
+buffer1 <- lrt_stops %>% 
+  st_buffer(units::as_units("1km")) %>%
+  st_union() %>%
+  st_boundary() %>%
+  st_sf() %>%
+  mutate(radius="1km") 
+
+buffer2 <- lrt_stops %>% 
+  st_buffer(units::as_units("2km")) %>%
+  st_union() %>%
+  st_boundary() %>%
+  st_sf() %>%
+  mutate(radius="2km")
+
+buffer1_half <- lrt_stops %>% 
+  st_buffer(units::as_units("1.5km")) %>%
+  st_union() %>%
+  st_boundary() %>%
+  st_sf() %>%
+  mutate(radius="1.5km")
+
+buffers <- bind_rows(buffer1, buffer1_half, buffer2) %>%
+  mutate(radius=fct_relevel(radius, c("1km", "1.5km", "2km")))
+
+ggplot(buffer2) + 
+  geom_water() + 
+  geom_roads(alpha=0.5, color="gray") + 
+  geom_sf(data=buffers, mapping=aes(linetype=radius), colour="firebrick") +
+  scale_linetype_manual(values=c("1km"="dotted", "1.5km"="dashed", "2km"="solid")) +
+  geom_sf(
+    data=filter(
+      bp, 
+      zoning=="RS", 
+      year>=2024, 
+      between(units_added, 7, 8)
+    ),
+    size=0.7,
+    colour="steelblue"
+  ) + 
+  geom_sf(data=lrt_stops, shape=21, colour="firebrick", fill=NA) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    rect = element_blank()
+  ) +
+  labs(
+    title="Map of all 7-8 unit building permits in RS Zone",
+    subtitle="January 1 2024-July 3, 2025",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+## Interactive map of 7-8plexes and LRT
+
+Here's the interactive map. Same colours/linetypes as the static map.
+
+
+```{r}
+#| column: screen
+mv <- mapview(
+  wards,
+  map.types=c("Stadia.StamenTonerLite", "CartoDB.Positron", "Esri.WorldImagery"),
+  alpha.regions=0,
+  label=str_to_title(wards$neighbourhood),
+  legend=FALSE,
+  layer.name="Neighbourhoods"
+) +
+mapview(
+  buffer2,
+  label="2km",
+  layer.name="2km",
+  color="firebrick",
+  lwd=1.75,
+  legend=FALSE
+) +
+  mapview(
+    buffer1_half,
+    dashArray= "20 10",
+    layer.name="1.5km",
+    label="1.5km",
+    color="firebrick",
+    lwd=1.75,
+    legend=FALSE
+  ) +
+  mapview(
+    buffer1,
+    dashArray= "4 5",
+    layer.name="1km",
+    label="1km",
+    color="firebrick",
+    lwd=1.75,
+    legend=FALSE
+  ) +
+  mapview(
+    lrt_stops,
+    cex=4,
+    col.regions="firebrick",
+    label=lrt_stops$stop_name_short,
+    legend=FALSE,
+    layer.name="LRT stops"
+  ) +
+  mapview(
+    plexes_only,
+    label=str_c(plexes_only$units_added, "plex"),
+    cex=2.2,
+    color="steelblue",
+    col.regions="steelblue",
+    alpha.regions=1,
+    legend=FALSE,
+    layer.name="7-8plex in RS building permits"
+  )
+removeMapJunk(mv@map, c("homeButton", "easyButton", "drawToolbar", "scaleBar")) %>%
+  leaflet.extras::addFullscreenControl()
+```
