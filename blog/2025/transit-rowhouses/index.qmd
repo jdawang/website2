@@ -371,7 +371,7 @@ Here's the interactive map. Same colours/linetypes as the static map.
 #| column: screen
 mv <- mapview(
   wards,
-  map.types=c("Stadia.StamenTonerLite", "CartoDB.Positron", "Esri.WorldImagery"),
+  map.types=c("CartoDB.Positron", "Esri.WorldImagery"),
   alpha.regions=0,
   label=str_to_title(wards$neighbourhood),
   legend=FALSE,
