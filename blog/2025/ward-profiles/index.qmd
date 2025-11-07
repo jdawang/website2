@@ -487,7 +487,7 @@ bp_current_ward %>%
   scale_y_continuous(labels=scales::label_percent()) +
   theme_grey() +
   labs(
-    title="Cumulative distribution of 7-8plexes by distance from closest LRT stop in Ward Nakota Isga",
+    title="Cumulative distribution of 7-8plexesby distance\nfrom closest LRT stop in Ward Nakota Isga",
     subtitle="Existing, under construction, and funded, building permits 2024-2025",
     x="Distance from closest LRT stop (km)",
     y="Cumulative proportion of building permits",
@@ -766,7 +766,7 @@ bp_current_ward %>%
   scale_y_continuous(labels=scales::label_percent()) +
   theme_grey() +
   labs(
-    title=glue("Cumulative distribution of 7-8plexes by distance from closest LRT stop in Ward {current_ward_name}"),
+    title=glue("Cumulative distribution of 7-8plexes by distance\nfrom closest LRT stop in Ward {current_ward_name}"),
     subtitle="Existing, under construction, and funded, building permits 2024-2025",
     x="Distance from closest LRT stop (km)",
     y="Cumulative proportion of building permits",
