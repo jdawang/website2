@@ -740,6 +740,9 @@ ggplot(
   )
 ```
 
+The cumulative distribution plot in @fig-cum-dist-lrt-sipiwiyiniwak confirms that 7-8plexes are built close to LRT, even more than in Ward Nakota Isga.
+75% are within 750m and 100% have been built within 1km.
+
 ```{r}
 #| label: fig-cum-dist-lrt-sipiwiyiniwak
 #| fig-cap: Cumulative distribution of 7-8plexes by distance from closest LRT stop in Ward sipiwiyiniwak
