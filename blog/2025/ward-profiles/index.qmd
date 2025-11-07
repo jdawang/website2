@@ -1,0 +1,776 @@
+---
+title: "Building briefing for new councillors"
+date: "2025-11-07"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning]
+description: "As new councillors take seats in four wards across Edmonton, here is a briefing about infill in the RS zone in their wards."
+link-external-newwindow: true
+link-external-icon: false
+---
+
+On October 20, Edmonton elected a new council and mayor. As I wrote in the [Edmonton Journal](https://edmontonjournal.com/opinion/columnists/opinion-voters-backed-infill-housing-now-lets-build-it-near-transit), pro-housing councillors were re-elected en-masse, despite the rhetoric about a change election. However, there are four new councillors elected in Wards Ipiihkoohkanipiaohtsi, Nakota Isga, pihêsiwin, and sipiwiyiniwak. Let's take a look at infill in their wards, how much is being built – or not – and where. Because basically all of city council's recent contentious votes surround the details of the RS zone (residential small scale), I will in turn focus the ward profiles on this zone, and especially the 7-8 unit rowhouses that are the most controversial.
+Also, this current council is definitely not going down below a 6 unit maximum, if at all, so the focus on 7-8 units is appropriate.
+
+But first, here's a RS zone primer.
+
+```{r}
+#| label: libaries
+
+library(tidyverse)
+library(sf)
+library(gt)
+library(mountainmathHelpers)
+library(tidytransit)
+library(reactable)
+library(glue)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path=Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key=Sys.getenv("NEXTZEN_API_KEY")
+)
+```
+
+## The RS Zone
+
+The RS zone permits a range of housing types, from a single-detached home with a backyard suite to a row house. The key regulations include a maximum building height of **10.5 metres** (about three storeys), a maximum site coverage of 45%, and a minimum site area of 75 square metres per dwelling.
+
+In July 2025, City Council passed significant amendments to the RS zone focused entirely on design, scale, and size of the permitted buildings. The most significant change was to building length. Previously, a building could be up to 30 metres long. The new, more restrictive rule states that for an interior lot, the maximum building length along an interior side lot line is now 50% of the site depth, or 25 metres, whichever is less. Other key design tweaks included limiting the total number of side-yard entrances to two and increasing the minimum side setback to 1.9 metres where a side entrance is located.
+
+What did not pass was a proposed reduction in maximum number of units midblock from 8 to 6.
+
+What does this mean in practice? If you've seen that photo from Crestwood (IYKYK), then that would not be allowed to be built any more. The buildings would have to be way shallower, and more set back from the side.
+
+## Data
+
+-   Edmonton's [general building permit data](https://data.edmonton.ca/Urban-Planning-Economy/General-Building-Permits/24uj-dj8v/about_data) has tracked building permits since 2009. It contains columns for building type, work type, location, units added, and more for each building permit.
+
+-   Edmonton's [property assessment data](https://data.edmonton.ca/City-Administration/Property-Assessment-Data-Current-Calendar-Year-/q7d6-ambg) contains one row per assessed property, along with their zoning. I use it as a comprehensive list of properties.
+
+-   Edmonton's [zoning data](https://data.edmonton.ca/Thematic-Features/Zoning-Bylaw-Geographical-Data/fixa-tstc) contains spatial data for each zone.
+
+-   LRT station locations.
+
+-   Neighbourhood and ward boundaries.
+
+```{r}
+#| label: data
+
+mature_neighbourhood <- read_sf("../population-growth-rowhouses/data/Mature Neighbourhoods_20241222.geojson") %>% 
+  rename(neighbourhood=neighbourh) %>%
+  filter(neighbourhood != "Downtown")
+
+henday <- read_sf("../population-growth-rowhouses/data/henday.geojson")
+
+bp <- read_rds("../upzoning-effect/data/bp_filled.rds")
+crs <- lambert_conformal_conic_at(bp)
+bp <- bp %>% st_transform(crs)
+assessment <- read_sf("../population-growth-rowhouses/data/Property Information (Current Calendar Year)_20250510.geojson")
+
+
+henday <- st_transform(henday, crs)
+mature_neighbourhood <- st_transform(mature_neighbourhood, crs)
+
+assessment <- assessment %>%
+  st_transform(crs) %>%
+  filter(!is.na(house_number), !is.na(longitude), !is.na(latitude)) %>%
+  mutate(
+    mature_neighbourhood=st_contains(st_union(mature_neighbourhood), ., sparse=FALSE)[1,] & !st_is_empty(.) & !is.na(neighbourhood),
+    outside_henday=!st_contains(henday, ., sparse=FALSE)[1,] & !st_is_empty(.),
+    between_henday_mature=!st_is_empty(.) & !mature_neighbourhood & !outside_henday
+  ) %>%
+  mutate(
+    mature_neighbourhood=(
+      mature_neighbourhood | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., mature_neighbourhood), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    outside_henday=(
+      outside_henday | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., outside_henday), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    between_henday_mature=(
+      between_henday_mature | (
+        !is.na(neighbourhood) &
+        (
+          neighbourhood %in% unique(
+            pull(
+              filter(., between_henday_mature), 
+              neighbourhood
+            )
+          )
+        )
+      )
+    ),
+    neighbourhood_type=fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in% c(
+          "THE HAMPTONS, GRANVILLE",
+          "RUTHERFORD, RUTHERFORD",
+          "THE UPLANDS, RIVER'S EDGE",
+          "ELLERSLIE INDUSTRIAL"
+        ) ~ "Outside Henday",
+        neighbourhood == "ELSINORE, ELSINORE" ~ "Between mature and Henday",
+        neighbourhood == "CENTRAL MCDOUGALL, QUEEN MARY PARK" ~ "Mature",
+        .default = NA_character_
+    ),
+    levels=c("Downtown", "Mature", "Between mature and Henday", "Outside Henday")
+    )
+  )
+
+future_lrt_stops <- read_sf("../../2024/all-lrt-stops-updated/data/future_lrt_stops.geojson") %>%
+  mutate(status="future")
+
+lrt_stops <- read_gtfs("../../2024/all-lrt-stops/data/ca-alberta-edmonton-transit-system-gtfs-714.zip") %>%
+  gtfs_as_sf() %>%
+  filter_stops(
+    route_ids=c("021R", "022R", "023R"),
+    service_ids=filter(.$calendar, date=="2023-11-09") %>% pull(service_id)
+  ) %>%
+  mutate(
+    stop_name=case_match(
+      stop_name,
+      "Bay Enterprise Square  Station" ~ "Bay Enterprise Square Station",
+      "Churchill Stop" ~ "Churchill Station",
+      .default=stop_name
+    ),
+    status="existing"
+  ) %>%
+  filter(!(stop_name %in% c("Metro Line JTTl Track", "DL MacDonald Platform", "NAIT Station"))) %>%
+  bind_rows(
+    future_lrt_stops %>%
+      filter(!(stop_name %in% c("Castle Downs Station", "145 Ave Station", "137 Ave Station", "132 Ave Station")))
+  ) %>%
+  st_transform(crs) %>%
+  group_by(stop_name, status) %>%
+  summarize(geometry=st_union(geometry), .groups="drop") %>%
+  mutate(geometry=st_centroid(geometry), stop_name_short=str_remove(stop_name, " (Stop|Station)"))
+
+wards <- read_csv("../population-growth-rowhouses/data/City_of_Edmonton_-_Neighbourhoods_20250704.csv") %>%
+  select(neighbourhood=`Neighbourhood Name`, Ward=`Civic Ward`) %>%
+  mutate(neighbourhood=str_to_upper(neighbourhood))
+population_1971 <- read_csv("../population-growth-rowhouses/data/population_1971.csv") %>%
+  select(neighbourhood=Neighbourhood, n_1971=`Total - Age`)
+population_2021 <- read_csv("../population-growth-rowhouses/data/population_2021.csv") %>%
+  distinct() %>%
+  rename(neighbourhood=NEIGHBOURHOOD, n_2021=`2021`)
+
+population_change <- population_2021 %>%
+  full_join(population_1971, by=join_by(neighbourhood)) %>%
+  left_join(wards, by=join_by(neighbourhood)) %>%
+  replace_na(list(n_2021=0, n_1971=0)) %>%
+  mutate(pct_change=n_2021 / n_1971 - 1)
+
+ward_boundaries <- read_sf("../upzoning-effect/data/wards.geojson") %>%
+  st_transform(crs) %>%
+  select(ward_name=name_1)
+
+neighbourhood_boundaries <- read_sf("data/City_of_Edmonton_-_Neighbourhoods_20251105.geojson") %>%
+  select(neighbourhood_number, neighbourhood=descriptive_name, ward_name=civic_ward_name) %>%
+  st_transform(crs)
+
+zoning <- read_sf("data/Zoning_Bylaw_Geographical_Data_20251105.geojson") %>%
+  filter(
+    zoning %in% c(
+      "RS", "RSF", "RM", "RL", "MU"
+    )
+  ) %>%
+  st_transform(crs) %>%
+  mutate(zoning_f=fct(zoning, levels=c("RS", "RSF", "RM", "RL", "MU")))
+  
+  
+zone_colours <- c(
+  "RS"="yellow",
+  "RSF"="darkgoldenrod",
+  "RM"="#FAA755",
+  "RL"="#FF920A",
+  "MU"="#FF0000",
+  "DC"="#40E0D0"
+)
+```
+
+## Ward Ipiihkoohkanipiaohtsi
+
+Let's start down south. Jon Morgan was elected councillor, defeating incumbent Jennifer Rice. First, let's take a look at just how much of his ward is zoned RS in @fig-ipiihkoohkanipiaohtsi-zoning.
+
+```{r}
+#| label: fig-ipiihkoohkanipiaohtsi-zoning
+#| fig-cap: Residential zoning in Ward Ipiihkoohkanipiaohtsi
+
+current_ward_name <- "Ipiihkoohkanipiaohtsi"
+
+current_ward_boundaries <- ward_boundaries %>%
+  filter(ward_name == current_ward_name)
+
+zoning_current_ward <- zoning %>%
+  st_make_valid() %>%
+  st_intersection(current_ward_boundaries) %>%
+  st_make_valid() %>%
+  group_by(zoning_f) %>%
+  summarize(geometry=st_union(geometry))
+
+ggplot(zoning_current_ward) + 
+  geom_sf(mapping=aes(fill=zoning_f), color=NA) +
+  scale_fill_manual(values=zone_colours) +
+  geom_sf(data=current_ward_boundaries, fill=NA) +
+  geom_water() + 
+  geom_roads(alpha=0.5, color="gray") + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    rect = element_blank()
+  ) +
+  labs(
+    title="Residential zoning in ward Ipiihkoohkanipiaohtsi",
+    caption="Jacob Dawang, City of Edmonton Open Data",
+    fill="Zoning"
+  )
+```
+
+There is definitely some RS just north of the Henday, but most of his ward is zoned RSF, which has barely been debated at council and is way more permissive than the RS zone.
+
+As we can see in @tbl-ipiihkoohkanipiaohtsi-bp, there is literally no 7-8plex activity happening in this ward at all. Not one has been permitted since ZBR came into effect in 2024.
+
+```{r}
+#| label: tbl-ipiihkoohkanipiaohtsi-bp
+#| tbl-cap: Number of 7-8plexes in ward Ipiihkoohkanipiaohtsi by neighbourhood
+
+
+bp_current_ward <- bp %>%
+  st_join(current_ward_boundaries, join=st_within)
+
+neighbourhoods_current_ward <- neighbourhood_boundaries %>%
+  filter(ward_name == current_ward_name) %>%
+  mutate(neighbourhood=str_to_upper(neighbourhood)) %>%
+  left_join(population_change, join_by(neighbourhood))
+
+n_plexes_rs <- bp %>%
+  st_filter(current_ward_boundaries) %>%
+  st_drop_geometry() %>%
+  #filter(neighbourhood %in% nbhd_list) %>%
+  group_by(neighbourhood, .drop=FALSE) %>%
+  filter(
+    zoning == "RS",
+    year>=2024,
+    between(units_added, 5, 8),
+  ) %>%
+  summarize(n_permits=n())
+
+n_assessed_rs_by_nbhd <- assessment %>%
+  st_filter(current_ward_boundaries) %>%
+  st_drop_geometry() %>%
+  distinct(house_number, street_name, .keep_all=TRUE) %>%
+  group_by(neighbourhood, zoning=factor(zoning), .drop=FALSE) %>%
+  summarize(n_properties=n(), .groups="drop") %>%
+  filter(zoning == "RS")
+
+merged <- n_plexes_rs %>% 
+  right_join(n_assessed_rs_by_nbhd, by=join_by(neighbourhood)) %>% 
+  replace_na(list(n_properties=0, n_permits=0)) %>%
+  mutate(neighbourhood=str_to_title(neighbourhood), pct_redevelop=n_permits/n_properties) %>%
+  arrange(desc(pct_redevelop), neighbourhood) %>%
+  relocate(pct_redevelop, .after=n_properties) %>%
+  select(-zoning)
+
+ward_aggregate <-  merged %>%
+  summarize(n_permits=sum(n_permits, na.rm=TRUE), n_properties=sum(n_properties, na.rm=TRUE)) %>%
+  mutate(neighbourhood="Total - Ward", pct_redevelop=n_permits/n_properties)
+
+gt(merged) %>%
+  rows_add(.list=ward_aggregate) %>%
+  cols_label(neighbourhood="Neighbourhood", n_permits="Number of 7-8 unit permits in RS zone", n_properties="Total number of properties zoned RS", pct_redevelop="% of properties redeveloped into 7-8plex") %>%
+  fmt_percent(pct_redevelop, decimals=0) %>%  
+  tab_header(
+    title=glue("Number of 7-8plexes in ward {current_ward_name} by neighbourhood"),
+    subtitle="RS zone, January 1, 2024 to November 5, 2025"
+  ) %>%
+  tab_source_note("Jacob Dawang, City of Edmonton Open Data") %>%
+  sub_missing()
+
+```
+
+## Ward Nakota Isga
+
+Next to Ward Nakota Isga. Reed Clarke won here, stepping into Andrew Knack's old seat, who became mayor. This ward includes much of the Valley Line West LRT under construction and stands to benefit a lot from it.
+
+@fig-nakota-isga-zoning shows that a lot of the ward is zoned RS. But, also a huge proportion of the RS-zoned land is within 800m walking distance of LRT, as shown by the green circles in the image.
+
+```{r}
+#| label: fig-nakota-isga-zoning
+#| fig-cap: Residential zoning in Ward Nakota Isga
+
+current_ward_name <- "Nakota Isga"
+
+current_ward_boundaries <- ward_boundaries %>%
+  filter(ward_name == current_ward_name)
+
+zoning_current_ward <- zoning %>%
+  st_make_valid() %>%
+  st_intersection(current_ward_boundaries) %>%
+  st_make_valid() %>%
+  group_by(zoning_f) %>%
+  summarize(geometry=st_union(geometry))
+
+ggplot(zoning_current_ward) + 
+  geom_sf(mapping=aes(fill=zoning_f), color=NA) +
+  scale_fill_manual(values=zone_colours) +
+  geom_sf(data=current_ward_boundaries, fill=NA) +
+  geom_sf(data=lrt_stops %>%  st_buffer(units::as_units("800m")) %>% st_filter(current_ward_boundaries), colour="forestgreen", fill=NA, size=0.6) +
+  geom_water() + 
+  geom_roads(alpha=0.5, color="gray") + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    rect = element_blank()
+  ) +
+  labs(
+    title=glue("Residential zoning in ward {current_ward_name}"),
+    subtitle="800m distance from LRT in green",
+    caption="Jacob Dawang, City of Edmonton Open Data",
+    fill="Zoning"
+  )
+```
+
+```{r}
+bp_current_ward <- bp %>%
+  st_filter(current_ward_boundaries)
+
+neighbourhoods_current_ward <- neighbourhood_boundaries %>%
+  filter(ward_name == current_ward_name) %>%
+  mutate(neighbourhood=str_to_upper(neighbourhood)) %>%
+  left_join(population_change, join_by(neighbourhood))
+```
+
+Nakota Isga is one of the wards seeing more building of 7-8plexes.
+@tbl-nakota-isga-bp shows that Glenwood has seen the most 7-8plexes approved so far, with 24.
+However, when compared to the overall size of the housing stock, redevelopment in the RS zone is still not significant, with only 0.9% of properties zoned RS in the ward developed into 7-8plexes since 2024.
+At this pace, it would be decades before even a significant minority of homes are 7-8plexes.
+
+As well, I have added population counts from the 1971 and 2021 censuses, as well as the percent change.
+These mature neighbourhoods in Ward Nakota Isga house less people -- in some cases significantly less -- from their design capacity.
+This decline in population is one of the main reasons why [their infrastructure](https://www.growtogetheryeg.com/blog/infrastructure) can handle more growth today.
+Making better use of the undercapacity sewers to alone saves the taxpayer so much money.
+
+```{r}
+#| label: tbl-nakota-isga-bp
+#| tbl-cap: Number of 7-8plexes in ward Nakota Isga by neighbourhood
+
+
+n_plexes_rs <- bp_current_ward %>%
+  st_drop_geometry() %>%
+  #filter(neighbourhood %in% nbhd_list) %>%
+  group_by(neighbourhood, .drop=FALSE) %>%
+  filter(
+    zoning == "RS",
+    year>=2024,
+    between(units_added, 7, 8),
+  ) %>%
+  summarize(n_permits=n())
+
+n_assessed_rs_by_nbhd <- assessment %>%
+  st_filter(current_ward_boundaries) %>%
+  st_drop_geometry() %>%
+  distinct(house_number, street_name, .keep_all=TRUE) %>%
+  group_by(neighbourhood, zoning=factor(zoning), .drop=FALSE) %>%
+  summarize(n_properties=n(), .groups="drop") %>%
+  filter(zoning == "RS")
+
+merged <- n_plexes_rs %>% 
+  right_join(n_assessed_rs_by_nbhd, by=join_by(neighbourhood)) %>%
+  left_join(population_change, by=join_by(neighbourhood)) %>%
+  replace_na(list(n_properties=0, n_permits=0)) %>%
+  mutate(neighbourhood=str_to_title(neighbourhood), pct_redevelop=n_permits/n_properties) %>%
+  arrange(desc(pct_redevelop), neighbourhood) %>%
+  relocate(pct_redevelop, .after=n_properties) %>%
+  select(-zoning, -Ward)
+
+ward_aggregate <-  merged %>%
+  summarize(n_permits=sum(n_permits, na.rm=TRUE), n_properties=sum(n_properties, na.rm=TRUE), n_1971=sum(n_1971, na.rm=TRUE), n_2021=sum(n_2021, na.rm=TRUE)) %>%
+  mutate(neighbourhood="Total - Ward", pct_redevelop=n_permits/n_properties, pct_change=n_2021/n_1971 - 1)
+
+gt(merged) %>%
+  rows_add(.list=ward_aggregate) %>%
+  cols_label(neighbourhood="Neighbourhood", n_permits="Number of 7-8 unit permits in RS zone", n_properties="Total number of properties zoned RS", pct_redevelop="% of properties redeveloped into 7-8plex", n_2021="Population 2021", n_1971="Population 1971", pct_change="% change in population") %>%
+  fmt_integer(columns=c(n_1971, n_2021, n_permits, n_properties)) %>%
+  fmt_percent(columns=pct_change,decimals=0) %>%
+  fmt_percent(columns=pct_redevelop, decimals=2) %>%
+ tab_header(
+    title=glue("Number of 7-8plexes in ward {current_ward_name} by neighbourhood"),
+    subtitle="RS zone, January 1, 2024 to November 5, 2025"
+  ) %>%
+  tab_source_note("Jacob Dawang, City of Edmonton Open Data, StatCan census") %>%
+  sub_missing()
+```
+
+It's impossible to talk about infill in Ward Nakota Isga without talking about the Valley Line West LRT.
+@fig-nakota-isga-lrt shows a clear relation between the path of the LRT and where 7-8plexes are being built.
+
+```{r}
+#| label: fig-nakota-isga-lrt
+#| fig-cap: "7-8plex building permits in Ward Nakota Isga"
+ggplot(
+  bp_current_ward  %>%
+    filter(
+      zoning == "RS",
+      year>=2024,
+      between(units_added, 7, 8),
+    )
+  ) + 
+  geom_sf(size=0.8) +
+  geom_sf(data=current_ward_boundaries, fill=NA) +
+  geom_sf(data=lrt_stops %>%  st_buffer(units::as_units("800m")) %>% st_filter(current_ward_boundaries), colour="forestgreen", fill=NA, size=0.6) +
+  geom_water() + 
+  geom_roads(data=current_ward_boundaries, alpha=0.5, color="gray") + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    rect = element_blank()
+  ) +
+  labs(
+    title=glue("7-8plex building permits in Ward {current_ward_name}"),
+    subtitle="800m distance from LRT in green",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+To quantify distance from LRT, let's look at the cumulative distribution of 7-8plexes by distance from LRT.
+@fig-nakota-isga-cum-dist-lrt confirms that 7-8plexes are essentially following the Valley Line West.
+75% are built within 1km of a LRT stop, 50% are less than 750m away.
+
+```{r}
+#| label: fig-nakota-isga-cum-dist-lrt
+#| fig-cap: Cumulative distribution of 7-8plexes by distance from closest LRT stop in Ward Nakota Isga
+
+bp_current_ward %>%
+  mutate(
+    distance_from_lrt=apply(
+        st_distance(
+          ., 
+          lrt_stops, 
+        ),
+        1,
+        min
+    ) / 1000
+  ) %>%
+  filter(between(units_added, 7, 8), zoning=="RS") %>%
+  arrange(distance_from_lrt) %>%
+  mutate(
+    ecdf_values=ecdf(distance_from_lrt)(distance_from_lrt)
+  ) %>%
+  ggplot() +
+  geom_step(aes(x=distance_from_lrt, y=ecdf_values), linewidth=1, colour="#663f5e") +
+  scale_x_continuous(limits=c(0, 2), oob=scales::squish) +
+  scale_y_continuous(labels=scales::label_percent()) +
+  theme_grey() +
+  labs(
+    title="Cumulative distribution of 7-8plexes by distance from closest LRT stop in Ward Nakota Isga",
+    subtitle="Existing, under construction, and funded, building permits 2024-2025",
+    x="Distance from closest LRT stop (km)",
+    y="Cumulative proportion of building permits",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+## Ward pihêsiwin
+
+On to Ward pihêsiwin where Mike Elliott won, filling Tim Cartmell's old seat.
+
+In @fig-zoning-pihesiwin, we see that the northern part of the ward is zoned RS, whereas the southern part is zoned for the more flexible RSF.
+
+```{r}
+#| label: fig-zoning-pihesiwin
+#| fig-cap: Residential zoning in Ward pihêsiwin
+
+current_ward_name <- "pihêsiwin"
+
+current_ward_boundaries <- ward_boundaries %>%
+  filter(ward_name == current_ward_name)
+
+zoning_current_ward <- zoning %>%
+  st_make_valid() %>%
+  st_intersection(current_ward_boundaries) %>%
+  st_make_valid() %>%
+  group_by(zoning_f) %>%
+  summarize(geometry=st_union(geometry))
+
+ggplot(zoning_current_ward) + 
+  geom_sf(mapping=aes(fill=zoning_f), color=NA) +
+  scale_fill_manual(values=zone_colours) +
+  geom_sf(data=current_ward_boundaries, fill=NA) +
+  geom_sf(data=lrt_stops %>%  st_buffer(units::as_units("800m")) %>% st_filter(current_ward_boundaries), colour="forestgreen", fill=NA) +
+  geom_water() + 
+  geom_roads(alpha=0.5, color="gray") + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    rect = element_blank()
+  ) +
+  labs(
+    title=glue("Residential zoning in ward {current_ward_name}"),
+    caption="Jacob Dawang, City of Edmonton Open Data",
+    fill="Zoning"
+  )
+```
+
+```{r}
+bp_current_ward <- bp %>%
+  st_filter(current_ward_boundaries)
+
+neighbourhoods_current_ward <- neighbourhood_boundaries %>%
+  filter(ward_name == current_ward_name) %>%
+  mutate(neighbourhood=str_to_upper(neighbourhood)) %>%
+  left_join(population_change, join_by(neighbourhood))
+```
+
+Just like Ward Ipiihkoohkanipiaohtsi, there has been literally zero 7-8plexes approved in the RS zone in pihêsiwin.
+Infill of the form that has some people up in arms is simply not happening at all in this ward.
+
+```{r}
+#| label: tbl-pihesiwin-bp
+#| tbl-cap: Number of 7-8plexes in ward Ward pihêsiwin by neighbourhood
+n_plexes_rs <- bp_current_ward %>%
+  st_drop_geometry() %>%
+  #filter(neighbourhood %in% nbhd_list) %>%
+  group_by(neighbourhood, .drop=FALSE) %>%
+  filter(
+    zoning == "RS",
+    year>=2024,
+    between(units_added, 7, 8),
+  ) %>%
+  summarize(n_permits=n())
+
+n_assessed_rs_by_nbhd <- assessment %>%
+  st_filter(current_ward_boundaries) %>%
+  st_drop_geometry() %>%
+  distinct(house_number, street_name, .keep_all=TRUE) %>%
+  group_by(neighbourhood, zoning=factor(zoning), .drop=FALSE) %>%
+  summarize(n_properties=n(), .groups="drop") %>%
+  filter(zoning == "RS")
+
+merged <- n_plexes_rs %>% 
+  right_join(n_assessed_rs_by_nbhd, by=join_by(neighbourhood)) %>%
+  left_join(population_change, by=join_by(neighbourhood)) %>%
+  replace_na(list(n_properties=0, n_permits=0)) %>%
+  mutate(neighbourhood=str_to_title(neighbourhood), pct_redevelop=n_permits/n_properties) %>%
+  arrange(desc(pct_redevelop), neighbourhood) %>%
+  relocate(pct_redevelop, .after=n_properties) %>%
+  select(-zoning, -Ward)
+
+ward_aggregate <-  merged %>%
+  summarize(n_permits=sum(n_permits, na.rm=TRUE), n_properties=sum(n_properties, na.rm=TRUE), n_1971=sum(n_1971, na.rm=TRUE), n_2021=sum(n_2021, na.rm=TRUE)) %>%
+  mutate(neighbourhood="Total - Ward", pct_redevelop=n_permits/n_properties, pct_change=n_2021/n_1971 - 1)
+
+gt(merged) %>%
+  rows_add(.list=ward_aggregate) %>%
+  cols_label(neighbourhood="Neighbourhood", n_permits="Number of 7-8 unit permits in RS zone", n_properties="Total number of properties zoned RS", pct_redevelop="% of properties redeveloped into 7-8plex", n_2021="Population 2021", n_1971="Population 1971", pct_change="% change in population") %>%
+  fmt_integer(columns=c(n_1971, n_2021, n_permits, n_properties)) %>%
+  fmt_percent(columns=pct_change,decimals=0) %>%
+  fmt_percent(columns=pct_redevelop, decimals=2) %>%
+ tab_header(
+    title=glue("Number of 7-8plexes in ward {current_ward_name} by neighbourhood"),
+    subtitle="RS zone, January 1, 2024 to November 5, 2025"
+  ) %>%
+  tab_source_note("Jacob Dawang, City of Edmonton Open Data, StatCan census") %>%
+  sub_missing()
+```
+
+## Ward sipiwiyiniwak
+
+Lastly, Ward sipiwiyiniwak. Thu Parmar steps in for Sarah Hamilton, who elected not to run again.
+
+@fig-sipiwiyiniwak-zoning shows that the ward is a mix of RS in the northeast and the more flexible RSF in the southwest.
+The Valley Line West cuts across the northernmost part of the ward.
+```{r}
+#| label: fig-sipiwiyiniwak-zoning
+#| fig-cap: Residential zoning in Ward sipiwiyiniwak
+
+current_ward_name <- "sipiwiyiniwak"
+
+current_ward_boundaries <- ward_boundaries %>%
+  filter(ward_name == current_ward_name)
+
+zoning_current_ward <- zoning %>%
+  st_make_valid() %>%
+  st_intersection(current_ward_boundaries) %>%
+  st_make_valid() %>%
+  group_by(zoning_f) %>%
+  summarize(geometry=st_union(geometry))
+
+ggplot(zoning_current_ward) + 
+  geom_sf(mapping=aes(fill=zoning_f), color=NA) +
+  scale_fill_manual(values=zone_colours) +
+  geom_sf(data=current_ward_boundaries, fill=NA) +
+  geom_sf(data=lrt_stops %>%  st_buffer(units::as_units("800m")) %>% st_filter(current_ward_boundaries), colour="forestgreen", fill=NA, size=0.6) +
+  geom_water() + 
+  geom_roads(alpha=0.5, color="gray") + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    rect = element_blank()
+  ) +
+  labs(
+    title=glue("Residential zoning in ward {current_ward_name}"),
+    subtitle="800m distance from LRT in green",
+    caption="Jacob Dawang, City of Edmonton Open Data",
+    fill="Zoning"
+  )
+```
+
+```{r}
+bp_current_ward <- bp %>%
+  st_filter(current_ward_boundaries)
+
+neighbourhoods_current_ward <- neighbourhood_boundaries %>%
+  filter(ward_name == current_ward_name) %>%
+  mutate(neighbourhood=str_to_upper(neighbourhood)) %>%
+  left_join(population_change, join_by(neighbourhood))
+```
+
+Ward sipiwiyiniwak is seeing a *little* bit of infill in the RS zone.
+@tbl-sipiwiyiniwak-bp shows that Sherwood and Jasper Park have the most 7-8plexes, but it quickly drops off from there, with most neighbourhoods not having any 7-8plex infill in the past two years since ZBR.
+As a whole, only 27 of over 14,000 properties have been redeveloped into a 7-8plex.
+
+```{r}
+#| label: tbl-sipiwiyiniwak-bp
+#| tbl-cap: Number of 7-8plexes in ward sipiwiyiniwak by neighbourhood
+
+
+n_plexes_rs <- bp_current_ward %>%
+  st_drop_geometry() %>%
+  #filter(neighbourhood %in% nbhd_list) %>%
+  group_by(neighbourhood, .drop=FALSE) %>%
+  filter(
+    zoning == "RS",
+    year>=2024,
+    between(units_added, 7, 8),
+  ) %>%
+  summarize(n_permits=n())
+
+n_assessed_rs_by_nbhd <- assessment %>%
+  st_filter(current_ward_boundaries) %>%
+  st_drop_geometry() %>%
+  distinct(house_number, street_name, .keep_all=TRUE) %>%
+  group_by(neighbourhood, zoning=factor(zoning), .drop=FALSE) %>%
+  summarize(n_properties=n(), .groups="drop") %>%
+  filter(zoning == "RS")
+
+merged <- n_plexes_rs %>% 
+  right_join(n_assessed_rs_by_nbhd, by=join_by(neighbourhood)) %>%
+  left_join(population_change, by=join_by(neighbourhood)) %>%
+  replace_na(list(n_properties=0, n_permits=0)) %>%
+  mutate(neighbourhood=str_to_title(neighbourhood), pct_redevelop=n_permits/n_properties) %>%
+  arrange(desc(pct_redevelop), neighbourhood) %>%
+  relocate(pct_redevelop, .after=n_properties) %>%
+  select(-zoning, -Ward)
+
+ward_aggregate <-  merged %>%
+  summarize(n_permits=sum(n_permits, na.rm=TRUE), n_properties=sum(n_properties, na.rm=TRUE), n_1971=sum(n_1971, na.rm=TRUE), n_2021=sum(n_2021, na.rm=TRUE)) %>%
+  mutate(neighbourhood="Total - Ward", pct_redevelop=n_permits/n_properties, pct_change=n_2021/n_1971 - 1)
+
+gt(merged) %>%
+  rows_add(.list=ward_aggregate) %>%
+  cols_label(neighbourhood="Neighbourhood", n_permits="Number of 7-8 unit permits in RS zone", n_properties="Total number of properties zoned RS", pct_redevelop="% of properties redeveloped into 7-8plex", n_2021="Population 2021", n_1971="Population 1971", pct_change="% change in population") %>%
+  fmt_integer(columns=c(n_1971, n_2021, n_permits, n_properties)) %>%
+  fmt_percent(columns=pct_change,decimals=0) %>%
+  fmt_percent(columns=pct_redevelop, decimals=2) %>%
+ tab_header(
+    title=glue("Number of 7-8plexes in ward {current_ward_name} by neighbourhood"),
+    subtitle="RS zone, January 1, 2024 to November 5, 2025"
+  ) %>%
+  tab_source_note("Jacob Dawang, City of Edmonton Open Data, StatCan census")  %>%
+  sub_missing()
+```
+
+Where are 7-8plexes being built? @fig-sipiwiyiniwak-lrt-dist shows that they are basically all within 800m of the Valley Line West LRT: true transit-oriented housing.
+
+```{r}
+#| label: fig-sipiwiyiniwak-lrt-dist
+#| fig-cap: "7-8plex building permits in Ward sipiwiyiniwak"
+
+ggplot(
+  bp_current_ward  %>%
+    filter(
+      zoning == "RS",
+      year>=2024,
+      between(units_added, 7, 8),
+    )
+  ) + 
+  geom_sf(size=0.8) +
+  geom_sf(data=current_ward_boundaries, fill=NA) +
+  geom_sf(data=lrt_stops %>%  st_buffer(units::as_units("800m")) %>% st_filter(current_ward_boundaries), colour="forestgreen", fill=NA, size=0.6) +
+  geom_water() +
+  geom_roads(data=current_ward_boundaries, alpha=0.5, color="gray") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    rect = element_blank()
+  ) +
+  labs(
+    title=glue("Residential zoning in ward {current_ward_name}"),
+    subtitle="800m distance from LRT in green",
+    caption="Jacob Dawang, City of Edmonton Open Data",
+    fill="Zoning"
+  )
+```
+
+```{r}
+#| label: fig-cum-dist-lrt-sipiwiyiniwak
+#| fig-cap: Cumulative distribution of 7-8plexes by distance from closest LRT stop in Ward sipiwiyiniwak
+
+bp_current_ward %>%
+  mutate(
+    distance_from_lrt=apply(
+        st_distance(
+          ., 
+          lrt_stops, 
+        ),
+        1,
+        min
+    ) / 1000
+  ) %>%
+  filter(between(units_added, 7, 8), zoning=="RS") %>%
+  arrange(distance_from_lrt) %>%
+  mutate(
+    ecdf_values=ecdf(distance_from_lrt)(distance_from_lrt)
+  ) %>%
+  ggplot() +
+  geom_step(aes(x=distance_from_lrt, y=ecdf_values), linewidth=1, colour="#663f5e") +
+  scale_x_continuous(limits=c(0, 1), oob=scales::squish) +
+  scale_y_continuous(labels=scales::label_percent()) +
+  theme_grey() +
+  labs(
+    title=glue("Cumulative distribution of 7-8plexes by distance from closest LRT stop in Ward {current_ward_name}"),
+    subtitle="Existing, under construction, and funded, building permits 2024-2025",
+    x="Distance from closest LRT stop (km)",
+    y="Cumulative proportion of building permits",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
