@@ -1,0 +1,231 @@
+---
+title: "A quick look at infill's effect on property values"
+date: today
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning, property value]
+description: "A few graphs and tables for preliminary work on infill construction's effects on property values."
+link-external-newwindow: true
+link-external-icon: false
+---
+
+```{r}
+#| label: libraries
+library(tidyverse)
+library(sf)
+library(gt)
+library(mountainmathHelpers)
+```
+
+I'm working on a longer post using property assessment data to estimate whether infill construction has an effect on property values.
+The claim that infill and/or upzoning hurts property values has been tossed around in Edmonton lately, but is that really the case?
+Here are just a couple graphs to show some descriptive analysis.
+
+## Data
+
+All data is from Edmonton's open data portal.
+
+- Building permit data.
+- Historical assessment data from 2015-2025.
+- Mature neighbourhood boundaries.
+
+To clean the data, I filter assessment data for the residential cateogry, create variables for the change in assessment values year-over-year, and an indicator for if a multi-unit building permit of greater than six units was issued within 50m in the year prior to the assessment year.
+For example, if the assessment year is 2025, then the indicator will be 1 if a multi-unit building permit was issued in 2024, and 0 otherwise.
+This gives time for the effect of permit issuance to be reflected in the assessed value.
+Lastly, I filter the data for mature neighbourhoods only, to ensure we're taking into account the effect of infill where it was newly allowed most, not new greenfield.
+
+```{r}
+#| label: data
+bp_filled <- read_rds("../property-values/data/bp_filled.rds")
+crs <- st_crs(bp_filled)
+mature_neighbourhood <- read_sf("../property-values/data/Mature Neighbourhoods_20241222.geojson") %>% 
+  rename(neighbourhood=neighbourh) %>%
+  filter(neighbourhood != "Downtown") %>%
+  st_transform(crs)
+historical_assessment <- read_rds("../property-values/data/assessment_historical.rds")
+assessment_2025 <- read_csv("../property-values/data/assessment_2025.csv") %>%
+  st_as_sf(coords=c("Longitude", "Latitude"), crs=4326) %>%
+  st_transform(crs) %>%
+  rename(
+    mill_class_1=`Assessment Class 1`,
+    mill_class_2=`Assessment Class 2`,
+    mill_class_3=`Assessment Class 3`,
+    tax_class_pct_1=`Assessment Class % 1`,
+    tax_class_pct_2=`Assessment Class % 2`,
+    tax_class_pct_3=`Assessment Class % 3`,
+    neighbourhood_name=Neighbourhood
+  ) %>%
+  rename_all(
+    function(s) str_to_lower(s) %>% str_replace_all(" ", "_")
+  ) %>%
+  mutate(assessment_year=2025) %>%
+  select(-point_location)
+historical_assessment <- bind_rows(
+  historical_assessment %>% 
+    select(
+      account_number,assessment_year, neighbourhood_name, assessed_value, mill_class_1
+    ),
+  assessment_2025 %>% 
+    select(
+      account_number,assessment_year, neighbourhood_name, assessed_value, mill_class_1
+    )
+) %>%
+  filter(mill_class_1 == "RESIDENTIAL", assessed_value > 0, !st_is_empty(.)) %>%
+  group_by(account_number) %>%
+  arrange(assessment_year) %>%
+  mutate(
+    d_assessment=assessed_value - lag(assessed_value),
+    d_log_assessment=log(assessed_value) - lag(log(assessed_value)),
+    pct_change=assessed_value / lag(assessed_value) - 1,
+  )
+```
+
+```{r}
+#| label: merge-data
+years_included <- c(2015:2025)
+merged_fn <- glue::glue("data/merged_{years_included[1]}_{years_included[length(years_included)]}.rds")
+
+if (!file.exists(merged_fn)) {
+  merged <- reduce(
+    years_included,
+    function(df, y) {
+      bp_filtered <- bp_filled %>%
+        filter(year == y - 1) %>%
+        mutate(
+          units_multi=ifelse(
+            (
+              as.character(project_type) %in% c(
+              "New SFH", "Backyard House", "Duplex to Fourplex")
+            )
+            | (units_added < 6),
+          0, 
+          units_added
+          )
+        )
+      assessment_filtered <- df %>%
+        select(-units_multi, -n_permits_multi) %>%
+        filter(assessment_year == y)
+      aggregated <- assessment_filtered %>%
+        st_join(
+          bp_filtered,
+          join=st_is_within_distance,
+          dist=units::as_units("50m")
+        ) %>% 
+        st_drop_geometry() %>% 
+        group_by(account_number)%>% 
+        summarize(
+          units_multi=sum(units_multi, na.rm=TRUE),
+          n_permits_multi=sum(ifelse(units_multi > 0, 1, 0), na.rm=TRUE)
+        )
+      to_insert <- assessment_filtered %>% left_join(aggregated, join_by(account_number))
+      to_ret <- bind_rows(
+        df %>% filter(assessment_year != y),
+        to_insert
+      )
+      return(to_ret)
+    },
+    #.dir="backward",
+    .init=(
+      historical_assessment %>% 
+        mutate(units_multi=NA, n_permits_multi=NA) %>% 
+        filter(assessment_year >= years_included[1])
+    )
+  ) %>%
+    write_rds(merged_fn, version=3)
+} else {
+  merged <- read_rds(merged_fn)
+}
+```
+
+```{r}
+#| label: prep-data
+
+prepped <- merged %>% 
+  filter(assessment_year > years_included[1]) %>% 
+  st_filter(st_union(mature_neighbourhood)) %>% 
+  st_drop_geometry() %>%
+  group_by(account_number) %>%
+  arrange(assessment_year) %>%
+  mutate(
+    units_multi_yn=ifelse(units_multi>0, 1, 0),
+    first_year_multi=min(ifelse(units_multi > 0, assessment_year, Inf))
+  )
+```
+
+## Results
+
+Since properties will have specific characteristics that affect their value, examining the change in property value year-over-year can help control for these factors.
+Thus, we can more closely get at the true infill effect.
+
+As property value inflation is generally measured in percent, that's what I examine first in @fig-pct-change.
+As can be seen, there is generally no correlation between having a permit for a multi-unit building issued within 50m in mature neighbourhoods.
+Some years, property values appreciate more, some years less, due to natural randomness.
+On a whole, it seems like properties near multi-unit permits generally appreciate equally as much or more than properties further away.
+
+```{r}
+#| label: fig-pct-change
+#| fig-cap: "Median year-over-year percent property value change grouped by if a multi-unit building was built nearby"
+prepped %>%
+  group_by(assessment_year, units_multi_yn) %>%
+  summarize(
+    mean_assessed_value=mean(assessed_value),
+    mean_change=mean(d_assessment, na.rm=TRUE),
+    median_change=median(d_assessment, na.rm=TRUE),
+    mean_pct_change=mean(pct_change, na.rm=TRUE),
+    median_pct_change=median(pct_change, na.rm=TRUE),
+    n=n(),
+    .groups="drop"
+  ) %>%
+  filter(assessment_year > years_included[1] + 1) %>%
+  ggplot() +
+  geom_col(
+    aes(x=factor(assessment_year), y=median_pct_change, fill=factor(units_multi_yn)),
+    position=position_dodge()
+  ) +
+  scale_y_continuous(labels=scales::label_percent(accuracy=1)) +
+  labs(
+    x="assessment year",
+    y=NULL,
+    fill="Multi-unit (>=6)\nbuilt within 50m",
+    title="Median year-over-year percent property value change",
+    subtitle="Grouped by if a multi-unit building was built nearby",
+    caption="Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+@fig-abs-change shows the same in absolute dollar terms.
+There is also not much difference in property value change between the infill nearby and no infill nearby groups.
+
+```{r}
+#| label: fig-abs-change
+#| fig-cap: "Median year-over-year absolute property value change grouped by if a multi-unit building was built nearby"
+prepped %>%
+  group_by(assessment_year, units_multi_yn) %>%
+  summarize(
+    mean_assessed_value=mean(assessed_value),
+    mean_change=mean(d_assessment, na.rm=TRUE),
+    median_change=median(d_assessment, na.rm=TRUE),
+    mean_pct_change=mean(pct_change, na.rm=TRUE),
+    median_pct_change=median(pct_change, na.rm=TRUE),
+    n=n(),
+    .groups="drop"
+  ) %>%
+  filter(assessment_year > years_included[1] + 1) %>%
+  ggplot() +
+  geom_col(
+    aes(x=factor(assessment_year), y=median_change, fill=factor(units_multi_yn)),
+    position=position_dodge()
+  ) +
+  scale_y_continuous(labels=scales::label_dollar()) +
+  labs(
+    x="assessment year",
+    y=NULL,
+    fill="Multi-unit (>=6)\nbuilt within 50m",
+    title="Median year-over-year property value change",
+    subtitle="Grouped by if a multi-unit building was built nearby"
+  )
+```
+
+## Next up
+
+While descriptive analysis is useful, I do plan on examining this question further using models which can control for the effect of neighbourhood, specific properties, and more.
+Meanwhile, on a surface level, it doesn't seem like infill has any effect on property values, positive or negative.
