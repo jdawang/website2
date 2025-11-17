@@ -6,6 +6,8 @@ categories: [housing, edmonton, zoning, property value]
 description: "A few graphs and tables for preliminary work on infill construction's effects on property values."
 link-external-newwindow: true
 link-external-icon: false
+execute: 
+  cache: refresh
 ---
 
 ```{r}
