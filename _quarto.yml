@@ -7,7 +7,8 @@ project:
     - "blog/**/*.md"
     - "!blog/2022/election-maps-2022/index.qmd"
     - "!README.md"
-    - "!blog/2025/upzoning-effect/index.qmd"
+    - "!blog/2025/property-values/index.qmd"
+    - "!blog/2025/election/index.qmd"
 
 
 execute:
