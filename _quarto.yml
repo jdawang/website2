@@ -9,7 +9,7 @@ project:
     - "!README.md"
     - "!blog/2025/property-values/index.qmd"
     - "!blog/2025/election/index.qmd"
-
+    - "!blog/2025/nodes-corridors-bp/index.qmd"
 
 execute:
   freeze: true
