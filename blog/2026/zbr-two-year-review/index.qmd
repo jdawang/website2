@@ -10,7 +10,9 @@ link-external-icon: false
 
 2025 is over and what a year it was for housing in Edmonton! In 2025, we found the missing middle, permitted a record number of homes, and permitted a record proportion of homes near our LRT stations. This is a testament to the power of zoning reform to drive equitable and sustainable growth.
 
-Without a doubt, the data shows that this is the result of Edmonton's Zoning By-Law Renewal (ZBR) that came into force in 2024, with the newly legalized five to eight unit rowhomes in mature neighbourhoods driving a ton of the increase. At the same time, the magic of density has ensured that only 0.4% of RS zoned properties in mature neighbourhoods were redeveloped the five to eight unit rowhomes. While a lot of *homes* have been permitted, not many *properties* have been affected. It's not the "avalanche" of infill you often hear about in the media.
+Without a doubt, the data shows that this is the result of Edmonton's Zoning Bylaw Renewal (ZBR) that came into force in 2024, with the newly legalized five-to-eight-unit rowhomes in mature neighbourhoods driving a ton of the increase. At the same time, the magic of density has ensured that only 0.4% of RS-zoned properties in mature neighbourhoods were redeveloped into the five-to-eight-unit rowhomes. While a lot of *homes* have been permitted, not many *properties* have been affected. It's not the "avalanche" of infill you often hear about in the media.
+
+![An eight home rowhouse under construction near me. It was legalized in this form across much of Edmonton by ZBR in 2024.](example_eight_unit.jpg){#fig-example-eight width="80%"}
 
 However, we can't just say "mission accomplished" and let things backslide. This is just one year of homebuilding and is a drop in the bucket for our housing stock. With City Council once again considering reducing the number of homes permitted per lot in February, we have to ensure that we keep our foot on the gas. What we're doing is working: we just need to continue. If you agree, consider joining [Grow Together Edmonton](https://www.growtogetheryeg.com/) to help us advocate for more housing choice, and a better way to grow.
 
@@ -24,7 +26,7 @@ In the rest of this blog post, I summarize the key facts, briefly describe the d
 
 -   The number of homes permitted in mature neighbourhoods almost equaled the number of homes permitted outside the Henday. It has never been close before.
 
--   The magic of density means few properties need to be redeveloped to build a ton of homes: only 0.2% of properties across the RS zone, and 0.4% within mature neighbourhoods were permitted to redevelop into 5 to 8 unit towhomes.
+-   The magic of density means few properties need to be redeveloped to build a ton of homes: only 0.2% of properties across the RS Zone, and 0.4% within mature neighbourhoods were permitted to redevelop into 5 to 8 unit townhomes.
 
 -   2025 was the best year on record for building homes near transit. 30% of homes were permitted within 800m, approximately a 15 minute walk, of transit.
 
@@ -347,7 +349,7 @@ Edmonton's [property assessment data](https://data.edmonton.ca/City-Administrati
 
 As well, Edmonton's LRT and future LRT network, definition of mature neighbourhoods, and the Henday boundaries are easily downloadable online.
 
-## RS zone primer
+## RS Zone primer
 
 The RS Zone was introduced in January 2024 as the primary residential zone for Edmonton’s established neighborhoods. It replaced several restrictive zones (RF1, RF2, RF3, and RF4) to simplify the development process for "missing middle" housing, such as duplexes, row houses, and small apartment-style builds. The key restrictions in this zone are:
 
@@ -361,9 +363,9 @@ Unfortunately, Edmonton City Council will be reconsidering reducing the number o
 
 ## We found the missing middle
 
-Alright, back to the data. First, let's look at the timeseries of building permits and units added by project type. @fig-project-type-raw-bp shows the raw number of building permits issued and @fig-project-type-units-added shows the corresponding number of units added.
+Alright, back to the data. First, let's look at the timeseries of building permits and units added by project type. @fig-project-type-raw-bp shows the raw number of building permits issued and @fig-project-type-units-added shows the corresponding number of homes added.
 
-It's been a huge year for Edmonton. We broke records. We permitted more homes in 2025 than ever before, and increasingly of "missing middle" type, providing options between large-scale apartments and single-family homes. For the first time ever, more homes were permitted in the five to eight unit rowhouse category than single family homes, as the lines cross in @fig-project-type-units-added-1.
+It's been a huge year for Edmonton. We broke records. We permitted more homes in 2025 than ever before, and increasingly of "missing middle" type, providing options between large-scale apartments and single-family homes. For the first time ever, more homes were permitted in the five-to-eight-unit rowhouse category than single family homes, as the lines cross in @fig-project-type-units-added-1.
 
 ::: callout-important
 The axes are different between the line plots and area plots below.
@@ -374,7 +376,7 @@ The axes are different between the line plots and area plots below.
 
 ```{r}
 #| label: fig-project-type-raw-bp
-#| fig-cap: "Number of building permits by project type, 2009-2025"
+#| fig-cap: "Number of new residential building permits by project type, 2009-2025"
 #| fig-subcap: ["Line plot", "Area plot"]
 
 project_type_dist <- bp %>%
@@ -410,13 +412,12 @@ ggplot(project_type_dist) +
   theme_dark()
 ```
 
-## Total units added
+## Total homes added
 
 ```{r}
 #| label: fig-project-type-units-added
-#| fig-cap: "Total number of units by project type, 2009-2025"
+#| fig-cap: "Total number of homes by project type, 2009-2025"
 #| fig-subcap: ["Line plot", "Area plot"]
-#| classes: preview-image
 
 ggplot(project_type_dist) +
   geom_line(aes(x=year, y=total, colour=project_type), linewidth=1) +
@@ -424,10 +425,10 @@ ggplot(project_type_dist) +
   scale_colour_viridis_d(option="magma") +
   scale_y_continuous(labels=scales::label_comma()) +
   labs(
-    title="Total number of units by project type",
+    title="Total number of homes by project type",
     subtitle="Building permits 2009-2025",
     colour="Project type",
-    y="Total number of units",
+    y="Total number of homes",
     caption="Jacob Dawang, City of Edmonton Open Data"
   ) +
   theme_dark()
@@ -437,10 +438,10 @@ ggplot(project_type_dist) +
   scale_fill_viridis_d(option="magma") +
   scale_y_continuous(labels=scales::label_comma()) +
   labs(
-    title="Total number of units by project type",
+    title="Total number of homes by project type",
     subtitle="Building permits 2009-2025",
     fill="Project type",
-    y="Total number of units",
+    y="Total number of homes",
     caption="Jacob Dawang, City of Edmonton Open Data"
   ) +
   theme_dark()
@@ -451,7 +452,7 @@ In @fig-units-added-nbhd-prj-type, we can see that 5-8 unit rowhomes and 9+ apar
 
 ```{r}
 #| label: fig-units-added-nbhd-prj-type
-#| fig-cap: "Total number of units by neighbourhood and project type"
+#| fig-cap: "Total number of homes by neighbourhood and project type"
 #| fig-subcap: ["Line plot", "Area plot"]
 
 bp %>%
@@ -465,11 +466,11 @@ ggplot() +
   scale_colour_viridis_d(option="magma") +
   scale_y_continuous(labels=scales::label_comma()) +
   labs(
-    title="Total number of units by neighbourhood and project type",
+    title="Total number of homes by neighbourhood and project type",
     subtitle="Building permits 2009-2025",
     colour="Project type",
     x="Year",
-    y="Total number of units",
+    y="Total number of homes",
     caption="Jacob Dawang, City of Edmonton Open Data"
   ) +
   theme_dark() +
@@ -485,11 +486,11 @@ ggplot() +
   scale_fill_viridis_d(option="magma") +
   scale_y_continuous(labels=scales::label_comma()) +
   labs(
-    title="Total number of units by neighbourhood and project type",
+    title="Total number of homes by neighbourhood and project type",
     subtitle="Building permits 2009-2025",
     fill="Project type",
     x="Year",
-    y="Total number of units",
+    y="Total number of homes",
     caption="Jacob Dawang, City of Edmonton Open Data"
   ) +
   theme_dark() +
@@ -498,11 +499,11 @@ ggplot() +
 
 This should also put the myth of "everyone wants ownership of a single-detached homes with a yard" to bed. Clearly, there is a huge number of people who would prefer to rent a townhome in a mature, central neighbourhood than be forced into a single-detached home in a new suburb. We permitted so many homes to be built in mature neighbourhoods, not because it's cheaper or easier than building a new single-detached home in greenfield, but because people desperately want to live in mature neighbourhoods, no matter the housing type. Providing people the option to live in their preferred neighbourhood at an affordable rate is a good thing, and Edmonton's zoning changes have started to enable this.
 
-So far, I have grouped 5 to 8 unit rowhomes together. How many are exactly eight units? Looking at the RS zone specifically, we can see in @tbl-unit-breakdown exactly eight homes is the most commonly permitted, and is the driver of the increase in the category of 5 to 8 unit rowhomes.
+So far, I have grouped 5 to 8 unit rowhomes together. How many are exactly eight units? Looking at the RS Zone specifically, we can see in @tbl-unit-breakdown exactly eight homes is the most commonly permitted, and is the driver of the increase in the category of 5 to 8 unit rowhomes.
 
 ```{r}
 #| label: tbl-unit-breakdown
-#| tbl-cap: Most housing production in the RS zone comes from projects with exactly eight units
+#| tbl-cap: Most housing production in the RS Zone comes from projects with exactly eight homes
 
 bp %>%
   st_drop_geometry() %>%
@@ -511,7 +512,7 @@ bp %>%
   summarize(total=sum(units_added), num_projects=n(), .groups="drop") %>%
   gt() %>%
   cols_label(
-    units_added="Number of units added in permit",
+    units_added="Number of homes added in permit",
     num_projects="Number of permits issued",
     total="Total number of homes added"
   ) %>%
@@ -521,11 +522,11 @@ bp %>%
   opt_stylize(style=5, color="green")
 ```
 
-Besides the direct effect on housing supply and affordability, Edmonton's zoning changes have enabled more people than ever to live close to transit. That means less people driving, less congestion, and less greenhouse gas emissions. In 2025, more homes were permitted close to transit than ever before. @fig-lrt-stop-distance, shows just how differentiated 2025 is. Besides permitting 30% of homes within 800m of transit, a record high for this threshold, the entire cumulative distribution is bowed up and to the left. That means we're building substantially closer to transit than ever before. Even if people don't live within walking distance, more people are going to have options that are a short bus ride or bike ride away.
+Besides the direct effect on housing supply and affordability, Edmonton's zoning changes have enabled more people than ever to live close to transit. That means fewer people driving, less congestion, and less greenhouse gas emissions. In 2025, more homes were permitted close to transit than ever before. @fig-lrt-stop-distance, shows just how differentiated 2025 is. Besides permitting 30% of homes within 800m of transit, a record high for this threshold, the entire cumulative distribution is bowed up and to the left. That means we're building substantially closer to transit than ever before. Even if people don't live within walking distance, more people are going to have options that are a short bus ride or bike ride away.
 
 ```{r}
 #| label: fig-lrt-stop-distance
-#| fig-cap: "Cumulative distribution of units added by distance from the closest existing or under construction LRT stop"
+#| fig-cap: "Cumulative distribution of homes added by distance from the closest existing or under construction LRT stop"
 
 bp %>% 
   filter(!st_is_empty(.)) %>%
@@ -554,7 +555,7 @@ bp %>%
   annotate("text", x=1.3, y=0.9, label="800m") +
   theme_dark() +
   labs(
-    title="Cumulative distribution of units added by distance from closest LRT stop",
+    title="Cumulative distribution of homes added by distance from closest LRT stop",
     subtitle="Existing, under construction, and funded stops",
     x="Distance from closest LRT stop (km)",
     y="Cumulative proportion of units added",
@@ -563,7 +564,7 @@ bp %>%
   )
 ```
 
-Once again, it is 5-8 unit rowhomes in the RS zone that is driving more homes to be built near transit. Breaking out a map in @fig-rowhome-lrt-dist-map, we can see that the 5-8 unit rowhomes follow the path of the LRT almost religiously, especially the Valley Line West.
+Once again, it is 5-8 unit rowhomes in the RS Zone that is driving more homes to be built near transit. Breaking out a map in @fig-rowhome-lrt-dist-map, we can see that the 5-8 unit rowhomes follow the path of the LRT almost religiously, especially the Valley Line West.
 
 ```{r}
 #| label: fig-rowhome-lrt-dist-map
@@ -664,13 +665,13 @@ ggplot(ecdf_transit) +
 
 ## The magic of density
 
-Despite the impressive number of units built, the number of properties redeveloped for this increase in housing produced is nowhere near as significant. That's the magic of density: a few hundred redeveloped properties can produce thousands of homes for people. Let's check the rate of redevelopment using property assessment data.
+Despite the impressive number of homes built, the number of properties redeveloped for this increase in housing produced is nowhere near as significant. That's the magic of density: a few hundred redeveloped properties can produce thousands of homes for people. Let's check the rate of redevelopment using property assessment data.
 
 In @tbl-probs, we see that: there is no "avalanche" of infill. Even in mature neighbourhoods, less than 1 in 200 homes have been redeveloped into a 5 to 8 unit rowhome. Compared to the total housing and property stock, the impressive building in 2025 is a drop in the bucket. It will take many years of building under these rules to truly provide a balance of housing options for people in all neighbourhoods.
 
 ```{r}
 #| label: tbl-probs
-#| tbl-cap: "Less than 0.5% of properties redeveloped in the RS zone a creates a couple thousand homes in 2025"
+#| tbl-cap: "Less than 0.5% of properties redeveloped in the RS Zone creates a couple thousand homes in 2025"
 
 n_plexes_rs <- bp %>%
   st_drop_geometry() %>%
@@ -708,15 +709,15 @@ gt(
     total_units_added="Number of homes added"
   ) |>
   tab_source_note("Jacob Dawang, City of Edmonton Open Data") %>% 
-  tab_header("Number of properties redeveloped into 5-8 units versus number of homes added in the RS zone by neighbourhood type", subtitle="2025 building permits") |>
+  tab_header("RS Zone intensity: comparing property redevelopment rates to housing gains", subtitle="2025 building permits") |>
   opt_stylize(style=5, color="green")
 ```
 
-We can drill down deeper into the rate of redevelopment by individual neighbouhrood in @tbl-selected-neighbourhood-profile. Concentrating on a handful of neighbourhoods that have been held up as examples of new rowhomes "destroying the neighbourhood", we can see some variation in the proportion of properties redeveloped. Nevertheless, rowhomes remain relatively rare in these neighbourhoods. Furthermore, these are all neighbourhoods that have lost population from 50 years ago. Some are as much as 30% less populated, which is yet another reason why infrastructure capacity is [not a barrier](https://www.growtogetheryeg.com/blog/infrastructure) to adding more homes to existing neighbourhoods. The new rowhomes are simply repopulating these neighbourhoods back to their design capacity.
+We can drill down deeper into the rate of redevelopment by individual neighbourhrood in @tbl-selected-neighbourhood-profile. Concentrating on a handful of neighbourhoods that have been held up as examples of new rowhomes "destroying the neighbourhood", we can see some variation in the proportion of properties redeveloped. Nevertheless, rowhomes remain relatively rare in these neighbourhoods. Furthermore, these are all neighbourhoods that have lost population from 50 years ago. Some are as much as 30% less populated, which is yet another reason why infrastructure capacity is [not a barrier](https://www.growtogetheryeg.com/blog/infrastructure) to adding more homes to existing neighbourhoods. The new rowhomes are simply repopulating these neighbourhoods back to their design capacity.
 
 ```{r}
 #| label: tbl-selected-neighbourhood-profile
-#| tbl-cap: "Selected neighbourhood 5-8 unit rowhome profiles in the RS zone"
+#| tbl-cap: "Selected neighbourhood 5-8 unit rowhome profiles in the RS Zone"
 #| column: page
 
 
@@ -782,7 +783,7 @@ merged %>%
   fmt_percent(columns=pct_change,decimals=0) %>%
   fmt_percent(columns=pct_redevelop, decimals=2) %>%
   tab_source_note("Jacob Dawang, City of Edmonton Open Data, StatCan Census") %>% 
-  tab_header("Selected neighbourhood 5-8 unit development profiles", subtitle="RS zone, 2025 building permits") %>%
+  tab_header("Selected neighbourhood 5-8 unit development profiles", subtitle="RS Zone, 2025 building permits") %>%
   opt_stylize(style=5, color="green")
 ```
 
@@ -790,7 +791,7 @@ I've created an interactive version in @tbl-selected-neighbourhood-profile so yo
 
 ```{r}
 #| label: tbl-full-neighbourhood-profile
-#| tbl-cap: "Neighbourhood 5-8 unit rowhome profiles in the RS zone"
+#| tbl-cap: "Interactive Profile: 5–8 Unit Rowhome Permits by Neighbourhood (2025)"
 #| column: page
 
 merged %>% 
@@ -813,7 +814,7 @@ merged %>%
   fmt_percent(columns=pct_change,decimals=0) %>%
   fmt_percent(columns=pct_redevelop, decimals=2) %>%
   tab_source_note("Jacob Dawang, City of Edmonton Open Data, StatCan Census") %>% 
-  tab_header("Neighbourhood 5-8 unit development profiles", subtitle="RS zone, 2025 building permits") %>%
+  tab_header("Interactive Profile: 5–8 Unit Rowhome Permits by Neighbourhood (2025)") %>%
   #opt_stylize(style=3, color="blue")  %>%
   opt_interactive(use_search=TRUE, use_highlight=TRUE, use_sorting=TRUE) %>%
   sub_missing()
@@ -823,7 +824,7 @@ In case you're interested in the cumulative statistics since ZBR was implemented
 
 ```{r}
 #| label: tbl-full-neighbourhood-profile-2024-25
-#| tbl-cap: "Neighbourhood 5-8 unit rowhome profiles in the RS zone, 2024-25"
+#| tbl-cap: "Cumulative Profile: 5–8 Unit Rowhome Permits (2024–2025)"
 #| column: page
 
 
@@ -873,7 +874,7 @@ merged_cum %>%
   fmt_percent(columns=pct_change,decimals=0) %>%
   fmt_percent(columns=pct_redevelop, decimals=2) %>%
   tab_source_note("Jacob Dawang, City of Edmonton Open Data, StatCan Census") %>% 
-  tab_header("Neighbourhood 5-8 unit development profiles", subtitle="RS zone, 2024-25 building permits") %>%
+  tab_header("Cumulative Profile: 5–8 Unit Rowhome Permits (2024–2025)") %>%
   #opt_stylize(style=3, color="blue")  %>%
   opt_interactive(use_search=TRUE, use_highlight=TRUE, use_sorting=TRUE) %>%
   sub_missing()
@@ -889,7 +890,7 @@ Despite this record-breaking success, our progress is fragile. In February, City
 
 If the data shows us anything, it’s that the 5 to 8 unit rowhome is the primary engine of our current success. To cap it now, just as it has begun to outpace single-family home construction, would be to intentionally stall Edmonton's momentum. It would mean fewer homes near transit, higher infrastructure costs for the city, and fewer options for the next generation of Edmontonians.
 
-We cannot afford to let the narrative of an "infill avalanche" win when the data clearly shows a incremental, successful transition.
+We cannot afford to let the narrative of an "infill avalanche" win when the data clearly shows an incremental, successful transition.
 
 -   **Share this analysis:** Use these numbers to show your neighbours and your Councillor that the Zoning Bylaw Renewal is working exactly as intended.
 
