@@ -20,13 +20,15 @@ In the rest of this blog post, I summarize the key facts, briefly describe the d
 
 ## Key facts
 
--   We are building a ton of homes: Edmonton issued building permits for a record number of homes in 2025, over 17,500.
+-   Edmonton issued building permits for a record number of homes in 2025, over 17,500.
 
 -   For the first time since the beginning of the dataset, more homes were permitted in rowhomes between 5 and 8 units than single family homes.
 
 -   The number of homes permitted in mature neighbourhoods almost equaled the number of homes permitted outside the Henday. It has never been close before.
 
 -   The magic of density means few properties need to be redeveloped to build a ton of homes: only 0.2% of properties across the RS Zone, and 0.4% within mature neighbourhoods were permitted to redevelop into 5 to 8 unit townhomes.
+
+-   Allowing eight homes per lot is critical: Projects with exactly eight units accounted for the vast majority of homes in the 5-8 unit category in the RS Zone.
 
 -   2025 was the best year on record for building homes near transit. 30% of homes were permitted within 800m, approximately a 15 minute walk, of transit.
 
@@ -677,7 +679,8 @@ n_plexes_rs <- bp %>%
   st_drop_geometry() %>%
   filter(
     zoning == "RS",
-    between(units_added, 5, 8)
+    between(units_added, 5, 8),
+    year == 2025
   ) %>%
   group_by(neighbourhood_type) %>%
   summarize(n_permits=n(), total_units_added=sum(units_added)) %>%
@@ -777,7 +780,8 @@ merged %>%
     n_properties="Number of properties",
     pct_redevelop="Percent of properties redeveloped",
     units_added="Number of homes added",
-    neighbourhood="Neighbourhood"
+    neighbourhood="Neighbourhood",
+    pct_change="Population change"
   ) %>%
   fmt_integer(columns=c(n_2021, n_1971, n_properties)) %>%
   fmt_percent(columns=pct_change,decimals=0) %>%
@@ -808,7 +812,8 @@ merged %>%
     n_properties="Number of properties",
     pct_redevelop="Percent of properties redeveloped",
     units_added="Number of homes added",
-    neighbourhood="Neighbourhood"
+    neighbourhood="Neighbourhood",
+    pct_change="Population change"
   ) %>%
   fmt_integer(columns=c(n_2021, n_1971, n_properties)) %>%
   fmt_percent(columns=pct_change,decimals=0) %>%
@@ -868,7 +873,8 @@ merged_cum %>%
     n_properties="Number of properties",
     pct_redevelop="Percent of properties redeveloped",
     units_added="Number of homes added",
-    neighbourhood="Neighbourhood"
+    neighbourhood="Neighbourhood",
+    pct_change="Population change"
   ) %>%
   fmt_integer(columns=c(n_2021, n_1971, n_properties)) %>%
   fmt_percent(columns=pct_change,decimals=0) %>%
@@ -890,7 +896,7 @@ Despite this record-breaking success, our progress is fragile. In February, City
 
 If the data shows us anything, it’s that the 5 to 8 unit rowhome is the primary engine of our current success. To cap it now, just as it has begun to outpace single-family home construction, would be to intentionally stall Edmonton's momentum. It would mean fewer homes near transit, higher infrastructure costs for the city, and fewer options for the next generation of Edmontonians.
 
-We cannot afford to let the narrative of an "infill avalanche" win when the data clearly shows an incremental, successful transition.
+We cannot afford to let the narrative of an "infill avalanche" win when the data clearly shows a measured, successful transition.
 
 -   **Share this analysis:** Use these numbers to show your neighbours and your Councillor that the Zoning Bylaw Renewal is working exactly as intended.
 
