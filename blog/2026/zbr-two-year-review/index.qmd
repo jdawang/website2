@@ -1,6 +1,6 @@
 ---
 title: "2025: The year Edmonton built the missing middle"
-date: "2026-01-01"
+date: "2026-01-05"
 author: "Jacob Dawang"
 categories: [housing, edmonton, zoning]
 description: "Edmonton saw a record-breaking surge in diverse housing types in 2025, while redeveloping less than 0.2% of low-density properties into rowhomes."

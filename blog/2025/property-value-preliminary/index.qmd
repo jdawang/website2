@@ -1,13 +1,11 @@
 ---
 title: "A quick look at infill's effect on property values"
-date: today
+date: 2025-11-16
 author: "Jacob Dawang"
 categories: [housing, edmonton, zoning, property value]
 description: "A few graphs and tables for preliminary work on infill construction's effects on property values."
 link-external-newwindow: true
 link-external-icon: false
-execute: 
-  cache: refresh
 ---
 
 ```{r}
@@ -18,22 +16,17 @@ library(gt)
 library(mountainmathHelpers)
 ```
 
-I'm working on a longer post using property assessment data to estimate whether infill construction has an effect on property values.
-The claim that infill and/or upzoning hurts property values has been tossed around in Edmonton lately, but is that really the case?
-Here are just a couple graphs to show some descriptive analysis.
+I'm working on a longer post using property assessment data to estimate whether infill construction has an effect on property values. The claim that infill and/or upzoning hurts property values has been tossed around in Edmonton lately, but is that really the case? Here are just a couple graphs to show some descriptive analysis.
 
 ## Data
 
 All data is from Edmonton's open data portal.
 
-- Building permit data.
-- Historical assessment data from 2015-2025.
-- Mature neighbourhood boundaries.
+-   Building permit data.
+-   Historical assessment data from 2015-2025.
+-   Mature neighbourhood boundaries.
 
-To clean the data, I filter assessment data for the residential cateogry, create variables for the change in assessment values year-over-year, and an indicator for if a multi-unit building permit of greater than six units was issued within 50m in the year prior to the assessment year.
-For example, if the assessment year is 2025, then the indicator will be 1 if a multi-unit building permit was issued in 2024, and 0 otherwise.
-This gives time for the effect of permit issuance to be reflected in the assessed value.
-Lastly, I filter the data for mature neighbourhoods only, to ensure we're taking into account the effect of infill where it was newly allowed most, not new greenfield.
+To clean the data, I filter assessment data for the residential cateogry, create variables for the change in assessment values year-over-year, and an indicator for if a multi-unit building permit of greater than six units was issued within 50m in the year prior to the assessment year. For example, if the assessment year is 2025, then the indicator will be 1 if a multi-unit building permit was issued in 2024, and 0 otherwise. This gives time for the effect of permit issuance to be reflected in the assessed value. Lastly, I filter the data for mature neighbourhoods only, to ensure we're taking into account the effect of infill where it was newly allowed most, not new greenfield.
 
 ```{r}
 #| label: data
@@ -155,13 +148,9 @@ prepped <- merged %>%
 
 ## Results
 
-Since properties will have specific characteristics that affect their value, examining the change in property value year-over-year can help control for these factors.
-Thus, we can more closely get at the true infill effect.
+Since properties will have specific characteristics that affect their value, examining the change in property value year-over-year can help control for these factors. Thus, we can more closely get at the true infill effect.
 
-As property value inflation is generally measured in percent, that's what I examine first in @fig-pct-change.
-As can be seen, there is generally no correlation between having a permit for a multi-unit building issued within 50m in mature neighbourhoods.
-Some years, property values appreciate more, some years less, due to natural randomness.
-On a whole, it seems like properties near multi-unit permits generally appreciate equally as much or more than properties further away.
+As property value inflation is generally measured in percent, that's what I examine first in @fig-pct-change. As can be seen, there is generally no correlation between having a permit for a multi-unit building issued within 50m in mature neighbourhoods. Some years, property values appreciate more, some years less, due to natural randomness. On a whole, it seems like properties near multi-unit permits generally appreciate equally as much or more than properties further away.
 
 ```{r}
 #| label: fig-pct-change
@@ -194,8 +183,7 @@ prepped %>%
   )
 ```
 
-@fig-abs-change shows the same in absolute dollar terms.
-There is also not much difference in property value change between the infill nearby and no infill nearby groups.
+@fig-abs-change shows the same in absolute dollar terms. There is also not much difference in property value change between the infill nearby and no infill nearby groups.
 
 ```{r}
 #| label: fig-abs-change
@@ -229,5 +217,4 @@ prepped %>%
 
 ## Next up
 
-While descriptive analysis is useful, I do plan on examining this question further using models which can control for the effect of neighbourhood, specific properties, and more.
-Meanwhile, on a surface level, it doesn't seem like infill has any effect on property values, positive or negative.
+While descriptive analysis is useful, I do plan on examining this question further using models which can control for the effect of neighbourhood, specific properties, and more. Meanwhile, on a surface level, it doesn't seem like infill has any effect on property values, positive or negative.
