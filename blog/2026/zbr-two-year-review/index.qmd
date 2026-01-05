@@ -3,14 +3,14 @@ title: "2025: The year Edmonton built the missing middle"
 date: "2026-01-05"
 author: "Jacob Dawang"
 categories: [housing, edmonton, zoning]
-description: "Edmonton saw a record-breaking surge in diverse housing types in 2025, while redeveloping less than 0.2% of low-density properties into rowhomes."
+description: "Edmonton saw a record-breaking surge in diverse housing types in 2025, while redeveloping less than 0.4% of low-density properties in mature neighbourhoods into rowhomes."
 link-external-newwindow: true
 link-external-icon: false
 ---
 
 2025 is over and what a year it was for housing in Edmonton! In 2025, we found the missing middle, permitted a record number of homes, and permitted a record proportion of homes near our LRT stations. This is a testament to the power of zoning reform to drive equitable and sustainable growth.
 
-Without a doubt, the data shows that this is the result of Edmonton's Zoning Bylaw Renewal (ZBR) that came into force in 2024, with the newly legalized five-to-eight-unit rowhomes in mature neighbourhoods driving a ton of the increase. At the same time, the magic of density has ensured that only 0.4% of RS-zoned properties in mature neighbourhoods were redeveloped into the five-to-eight-unit rowhomes. While a lot of *homes* have been permitted, not many *properties* have been affected. It's not the "avalanche" of infill you often hear about in the media.
+Without a doubt, the data shows that this is the result of Edmonton's Zoning Bylaw Renewal (ZBR) that came into force in 2024, with the newly legalized five-to-eight-unit rowhomes in mature neighbourhoods driving a ton of the increase. At the same time, the magic of density has ensured that less than 0.4% of RS-zoned properties in mature neighbourhoods were redeveloped into five-to-eight-unit rowhomes. While a lot of *homes* have been permitted, not many *properties* have been affected. It's not the "avalanche" of infill you often hear about in the media.
 
 ![An eight home rowhouse under construction near me. It was legalized in this form across much of Edmonton by ZBR in 2024.](example_eight_unit.jpg){#fig-example-eight width="80%"}
 
@@ -673,7 +673,7 @@ In @tbl-probs, we see that: there is no "avalanche" of infill. Even in mature ne
 
 ```{r}
 #| label: tbl-probs
-#| tbl-cap: "Less than 0.5% of properties redeveloped in the RS Zone creates a couple thousand homes in 2025"
+#| tbl-cap: "Less than 0.5% of properties redeveloped in the RS Zone creates a over 2,300 homes in 2025"
 
 n_plexes_rs <- bp %>%
   st_drop_geometry() %>%
@@ -716,7 +716,7 @@ gt(
   opt_stylize(style=5, color="green")
 ```
 
-We can drill down deeper into the rate of redevelopment by individual neighbourhrood in @tbl-selected-neighbourhood-profile. Concentrating on a handful of neighbourhoods that have been held up as examples of new rowhomes "destroying the neighbourhood", we can see some variation in the proportion of properties redeveloped. Nevertheless, rowhomes remain relatively rare in these neighbourhoods. Furthermore, these are all neighbourhoods that have lost population from 50 years ago. Some are as much as 30% less populated, which is yet another reason why infrastructure capacity is [not a barrier](https://www.growtogetheryeg.com/blog/infrastructure) to adding more homes to existing neighbourhoods. The new rowhomes are simply repopulating these neighbourhoods back to their design capacity.
+We can drill down deeper into the rate of redevelopment by individual neighbourhood in @tbl-selected-neighbourhood-profile. Concentrating on a handful of neighbourhoods that have been held up as examples of new rowhomes "destroying the neighbourhood", we can see some variation in the proportion of properties redeveloped. Nevertheless, rowhomes remain relatively rare in these neighbourhoods. Furthermore, these are all neighbourhoods that have lost population from 50 years ago. Some are as much as 30% less populated, which is yet another reason why infrastructure capacity is [not a barrier](https://www.growtogetheryeg.com/blog/infrastructure) to adding more homes to existing neighbourhoods. The new rowhomes are simply repopulating these neighbourhoods back to their design capacity.
 
 ```{r}
 #| label: tbl-selected-neighbourhood-profile
@@ -886,15 +886,15 @@ merged_cum %>%
   sub_missing()
 ```
 
-## Protecting the Progress
+## Protecting the progress
 
 The data from 2025 tells a story of a city finally finding its balance. For decades, Edmonton’s growth was pointed one direction: outwards into greenfield. By legalizing the "missing middle," we haven't just changed the zoning code, we've given people more choice to live their lives where it makes sense for them. We've done this through building townhomes near transit, walkable infill, and diverse housing choices in the neighborhoods people love most.
 
 We have proven that we don't need to "destroy" neighborhoods to house our neighbors. By redeveloping just **0.4% of RS-zoned properties** in mature areas, we added thousands of homes, which will start to bring life back to communities that have seen their populations dwindle by 20% to 40% since the 1970s. This is the definition of sustainable, efficient growth.
 
-Despite this record-breaking success, our progress is fragile. In February, City Council will probably once again consider a proposal to reduce the hard cap on homes per lot from eight down to six, along with multiple other reductions.
+Despite this record-breaking success, our progress is fragile. In February, City Council is expected to once again consider a proposal to reduce the hard cap on homes per lot from eight down to six, along with multiple other red
 
-If the data shows us anything, it’s that the 5 to 8 unit rowhome is the primary engine of our current success. To cap it now, just as it has begun to outpace single-family home construction, would be to intentionally stall Edmonton's momentum. It would mean fewer homes near transit, higher infrastructure costs for the city, and fewer options for the next generation of Edmontonians.
+If the data shows us anything, it’s that the 8 home rowhome is the primary engine of our current success. To cap it now, just as it has begun to outpace single-family home construction, would be to intentionally stall Edmonton's momentum. It would mean fewer homes near transit, higher infrastructure costs for the city, and fewer options for the next generation of Edmontonians.
 
 We cannot afford to let the narrative of an "infill avalanche" win when the data clearly shows a measured, successful transition.
 
