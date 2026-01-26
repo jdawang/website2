@@ -19,6 +19,9 @@ blog/**/renv/python/
 blog/**/renv/sandbox/
 blog/**/renv/staging/
 **/index_files/**
+data/
 
 
 /.luarc.json
+
+**/*.quarto_ipynb
