@@ -1,0 +1,739 @@
+---
+title: "Lot size per unit: a potentially dangerous regulation"
+date: "2026-01-26"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning]
+description: "Lot area per home has been suggested as a potential replacement for the eight-home hardcap in the RS zone. Looking at the data suggests this comes with some danger if tinkered with too much."
+link-external-newwindow: true
+link-external-icon: false
+---
+
+In my [last blog post](../zbr-two-year-review/index.qmd), I analyzed building permits from 2025, paying specific attention to the eight-unit permits. However, city administration's [proposal for the RS zone](https://www.edmonton.ca/residential_neighbourhoods/development-in-your-neighbourhood/infill-changes-feedback) is twofold:
+
+1.  Reduce the hard cap on number of homes permitted per lot to six on interior lots.
+2.  Increase the lot area required per home from 75m^2^ to 90m^2^ on interior lots and 80m^2^ on corners.
+
+At the same time, [Mayor Knack has mused](https://edmontonjournal.com/news/local-news/knack-open-to-flexible-infill-limits-as-city-reviews-unit-cap) about whether turfing the eight-unit hard cap in favour of a (presumably higher) lot area per home requirement.
+
+> “I think we need to make a change, but what I’m wondering about now is should it be a set number or should it be based on the size of the lot?” he said. “There are lots that are 900 square metres and there are lots that are 400 square metres. If you say six for the sake of six, does that actually make sense?
+
+Let's take a quick look at how different lot size per home thresholds could affect housing in the RS zone, with or without an eight unit hard cap.
+
+```{r}
+#| label: libraries
+library(tidyverse)
+library(sf)
+library(here)
+library(mountainmathHelpers)
+library(tidytransit)
+library(gganimate)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path = Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key = Sys.getenv("NEXTZEN_API_KEY")
+)
+```
+
+```{r}
+#| label: data
+
+data_dir <- here("../../../data")
+
+mature_neighbourhood <- read_sf(here(
+  data_dir,
+  "Mature Neighbourhoods_20241222.geojson"
+)) %>%
+  rename(neighbourhood = neighbourh) %>%
+  filter(neighbourhood != "Downtown")
+
+henday <- read_sf(here(data_dir, "henday.geojson"))
+
+bp <- read_sf(here(data_dir, "General Building Permits_20260113/")) %>%
+  filter(year < 2026)
+assessment <- read_sf(here(
+  data_dir,
+  "Property Information (Current Calendar Year)_20260113"
+))
+
+crs <- lambert_conformal_conic_at(bp)
+henday <- st_transform(henday, crs)
+mature_neighbourhood <- st_transform(mature_neighbourhood, crs)
+
+bp <- bp %>%
+  st_transform(crs) %>%
+  select(
+    -c(
+      count,
+      latitude,
+      longitude,
+      time_permi,
+      time_issue,
+      row_id,
+      date_permi,
+      neighbourh,
+      permit_num
+    ),
+    -contains("location")
+  ) %>%
+  rename(
+    construction_value = constructi,
+    month_number = month_numb,
+    building_type = building_t,
+    units_added = units_adde,
+    neighbourhood = neighbou_2,
+    job_category = job_catego,
+    job_description = job_descri,
+    date_issued = date_issue
+  ) %>%
+  filter(
+    units_added >= 1,
+    building_type %in%
+      c(
+        "Apartment (310)",
+        "Apartment Condos (315)",
+        "Apartments (310)",
+        "Backyard House (110)",
+        "Duplex (210)",
+        "Garden Suite (110)",
+        "Mixed Use (522)",
+        "Row House (330)",
+        "Row House Condo (335)",
+        "Row House Condos (335)",
+        "Row Houses (330)",
+        "Semi-Detached Condo (215)",
+        "Semi-Detached House (210)",
+        "Single Detached Condo (115)",
+        "Single Detached House (110)"
+      ),
+    work_type != "(04) Excavation",
+    #job_category != "Commercial Final"
+  ) %>%
+  mutate(
+    project_type = fct(
+      case_when(
+        (building_type %in%
+          c("Backyard House (110)", "Garden Suite (110)")) ~ "Backyard House",
+        (str_detect(work_type, coll("new", ignore_case = TRUE))) &
+          (units_added == 1) ~ "New SFH",
+        (work_type %in%
+          c(
+            "(03) Interior Alterations",
+            "(03) Exterior Alterations",
+            "(07) Add Suites to Single Dwelling",
+            "(08) Add Suites to Multi-Dwelling",
+            "(09) Convert Non-Res to Residential",
+            "(02) Addition",
+            "(12) Move Building on to Site"
+          )) ~ "Addition/Conversion",
+        between(units_added, 2, 4) ~ "Duplex to Fourplex",
+        between(units_added, 5, 8) ~ "Fiveplex to Eightplex",
+        str_detect(
+          building_type,
+          fixed("Row House", ignore_case = TRUE)
+        ) ~ "9+ Row House",
+        units_added >= 9 ~ "9+ Apartment",
+        .default = "I messed up"
+      ),
+      levels = c(
+        "New SFH",
+        "Addition/Conversion",
+        "Backyard House",
+        "Duplex to Fourplex",
+        "Fiveplex to Eightplex",
+        "9+ Row House",
+        "9+ Apartment"
+      )
+    ),
+    mature_neighbourhood = st_contains(
+      st_union(mature_neighbourhood),
+      .,
+      sparse = FALSE
+    )[1, ] &
+      !st_is_empty(.) &
+      !is.na(neighbourhood),
+    outside_henday = !st_contains(henday, ., sparse = FALSE)[1, ] &
+      !st_is_empty(.),
+    between_henday_mature = !st_is_empty(.) &
+      !mature_neighbourhood &
+      !outside_henday,
+    secondary_suite_desc = str_trim(
+      str_extract(
+        job_description,
+        regex("(\\d|a)? ?secondary suites?", ignore_case = TRUE)
+      )
+    ),
+    num_secondary_suites = case_when(
+      str_detect(secondary_suite_desc, "\\d") ~ as.numeric(str_extract(
+        secondary_suite_desc,
+        "\\d"
+      )),
+      str_to_lower(secondary_suite_desc) %in%
+        c(
+          "a secondary suite",
+          "secondary suite"
+        ) ~ 1,
+      str_to_lower(secondary_suite_desc) %in%
+        c(
+          "secondary suites",
+          "a secondary suites"
+        ) ~ units_added / 2,
+      .default = 0
+    ),
+    has_backyard_home = (str_detect(
+      job_description,
+      regex("garden suites?", ignore_case = TRUE)
+    ) |
+      str_detect(
+        job_description,
+        regex("backyard houses?", ignore_case = TRUE)
+      ))
+  ) %>%
+  mutate(
+    mature_neighbourhood = (mature_neighbourhood |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., mature_neighbourhood),
+              neighbourhood
+            )
+          )))),
+    outside_henday = (outside_henday |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., outside_henday),
+              neighbourhood
+            )
+          )))),
+    between_henday_mature = (between_henday_mature |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., between_henday_mature),
+              neighbourhood
+            )
+          )))),
+    neighbourhood_type = fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in%
+          c(
+            "THE HAMPTONS, GRANVILLE",
+            "RUTHERFORD, RUTHERFORD",
+            "THE UPLANDS, RIVER'S EDGE",
+            "ELLERSLIE INDUSTRIAL"
+          ) ~ "Outside Henday",
+        neighbourhood %in%
+          c(
+            "ELSINORE, ELSINORE",
+            "MICHAELS PARK",
+            "BRANDER GARDENS",
+            "PILOT SOUND AREA WEST PORTION, MCCONACHIE",
+            "YOUNGSTOWN INDUSTRIAL"
+          ) ~ "Between mature and Henday",
+        neighbourhood %in%
+          c(
+            "CENTRAL MCDOUGALL, QUEEN MARY PARK",
+            "WOODCROFT",
+            "BOYLE STREET",
+            "ELMWOOD"
+          ) ~ "Mature",
+        address %in%
+          c(
+            "8944 - 145 STREET NW",
+            "11216 - 122 STREET NW",
+            "9509 - 99B STREET NW"
+          ) ~ "Mature",
+        .default = NA_character_
+      ),
+      levels = c(
+        "Downtown",
+        "Mature",
+        "Between mature and Henday",
+        "Outside Henday"
+      )
+    ),
+    date_issued = as_date(date_issued)
+  )
+
+
+assessment <- assessment %>%
+  rename(
+    account_number = account_nu,
+    house_number = house_numb,
+    street_name = street_nam,
+    neighbourhood_number = neighbourh,
+    neighbourhood = neighbou_2
+  ) %>%
+  st_transform(crs) %>%
+  filter(!is.na(house_number), !is.na(longitude), !is.na(latitude)) %>%
+  mutate(
+    mature_neighbourhood = st_contains(
+      st_union(mature_neighbourhood),
+      .,
+      sparse = FALSE
+    )[1, ] &
+      !st_is_empty(.) &
+      !is.na(neighbourhood),
+    outside_henday = !st_contains(henday, ., sparse = FALSE)[1, ] &
+      !st_is_empty(.),
+    between_henday_mature = !st_is_empty(.) &
+      !mature_neighbourhood &
+      !outside_henday
+  ) %>%
+  mutate(
+    mature_neighbourhood = (mature_neighbourhood |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., mature_neighbourhood),
+              neighbourhood
+            )
+          )))),
+    outside_henday = (outside_henday |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., outside_henday),
+              neighbourhood
+            )
+          )))),
+    between_henday_mature = (between_henday_mature |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., between_henday_mature),
+              neighbourhood
+            )
+          )))),
+    neighbourhood_type = fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in%
+          c(
+            "THE HAMPTONS, GRANVILLE",
+            "RUTHERFORD, RUTHERFORD",
+            "THE UPLANDS, RIVER'S EDGE",
+            "ELLERSLIE INDUSTRIAL"
+          ) ~ "Outside Henday",
+        neighbourhood == "ELSINORE, ELSINORE" ~ "Between mature and Henday",
+        neighbourhood == "CENTRAL MCDOUGALL, QUEEN MARY PARK" ~ "Mature",
+        .default = NA_character_
+      ),
+      levels = c(
+        "Downtown",
+        "Mature",
+        "Between mature and Henday",
+        "Outside Henday"
+      )
+    )
+  )
+
+future_lrt_stops <- read_sf(
+  here(data_dir, "future_lrt_stops.geojson")
+) %>%
+  mutate(status = "future")
+
+lrt_stops <- read_gtfs(
+  here(data_dir, "ca-alberta-edmonton-transit-system-gtfs-714.zip")
+) %>%
+  gtfs_as_sf() %>%
+  filter_stops(
+    route_ids = c("021R", "022R", "023R"),
+    service_ids = filter(.$calendar, date == "2023-11-09") %>% pull(service_id)
+  ) %>%
+  mutate(
+    stop_name = case_match(
+      stop_name,
+      "Bay Enterprise Square  Station" ~ "Bay Enterprise Square Station",
+      "Churchill Stop" ~ "Churchill Station",
+      .default = stop_name
+    ),
+    status = "existing"
+  ) %>%
+  filter(
+    !(stop_name %in%
+      c("Metro Line JTTl Track", "DL MacDonald Platform", "NAIT Station"))
+  ) %>%
+  bind_rows(
+    future_lrt_stops %>%
+      filter(
+        !(stop_name %in%
+          c(
+            "Castle Downs Station",
+            "145 Ave Station",
+            "137 Ave Station",
+            "132 Ave Station"
+          ))
+      )
+  ) %>%
+  st_transform(crs) %>%
+  group_by(stop_name, status) %>%
+  summarize(geometry = st_union(geometry), .groups = "drop") %>%
+  mutate(
+    geometry = st_centroid(geometry),
+    stop_name_short = str_remove(stop_name, " (Stop|Station)")
+  )
+
+nc <- read_sf(here(data_dir, "Nodes_and_Corridors_20260114.geojson")) %>%
+  st_transform(crs)
+```
+
+First, let's examine the lot size of all RS-zoned properties in Edmonton. @fig-lot-size-dist shows that lot sizes in Edmonton are generally large. I've added dashed lines at where 75m^2^, 80m^2^, and 90m^2^ lot area per unit would allow eight units. This tells us that moving from 75m^2^ to 80m^2^ would be detrimental. Moving to 90m^2^ would sanitize large swaths of the RS zone to having eight homes or more, regardless of the hard cap.
+
+```{r}
+#| label: fig-lot-size-dist
+#| fig-cap: Distribution of lot sizes in the RS zone
+#| fig-subcap:
+#|   - "Histogram.  Dashed lines show 600m^2^, 640m^2^, and 720m^2^."
+#|   - "Cumulative distribution. Dashed lines show 600m^2^, 640m^2^, and 720m^2^."
+assessment %>%
+  filter(zoning == "RS") %>%
+  ggplot() +
+  geom_histogram(
+    aes(x = lot_size),
+    binwidth = 25,
+    fill = "#663f5f"
+  ) +
+  geom_vline(xintercept = c(75 * 8, 80 * 8, 90 * 8), linetype = "dashed") +
+  scale_x_continuous(limits = c(0, 1000), oob = scales::oob_squish) +
+  labs(
+    title = "Distribution of lot sizes in RS zone",
+    y = NULL,
+    x = "Lot size (sqm)",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  )
+
+assessment %>%
+  filter(zoning == "RS") %>%
+  ggplot(aes(lot_size)) +
+  stat_ecdf(linewidth = 1, colour = "#663f5f") +
+  scale_x_continuous(limits = c(0, 1000), oob = scales::oob_keep) +
+  scale_y_continuous(
+    labels = scales::label_percent(),
+    breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1)
+  ) +
+  geom_vline(xintercept = c(75 * 8, 80 * 8, 90 * 8), linetype = "dashed") +
+  labs(
+    title = "Cumulative Distribution of lot sizes in RS zone",
+    y = NULL,
+    x = "Lot size (sqm)",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+By dividing lot size by the lot area per unit threshold, we can get a summarized view of how many potential homes each threshold would allow on each lot.
+First, assuming the eight-home hard cap remains, we can see the detrimental effect of increasing the lot area threshold in @fig-units-permitted-hardcap-8.
+
+```{r}
+#| label: fig-units-permitted-hardcap-8
+#| fig-cap: Distribution of units permitted per lot in RS zone by lot size thresholds.
+
+calc_units_permitted_dist <- function(.data, lot_size_per_unit, hard_cap) {
+  .data %>%
+    st_drop_geometry() %>%
+    filter(zoning == "RS") %>%
+    mutate(
+      units_permitted = pmin(floor(lot_size / lot_size_per_unit), hard_cap)
+    ) %>%
+    group_by(units_permitted) %>%
+    summarize(n_properties = n(), .groups = "drop") %>%
+    mutate(
+      pct = n_properties / sum(n_properties),
+      threshold = lot_size_per_unit
+    )
+}
+
+plot_units_permitted_dist <- function(.data, lot_size_per_unit, hard_cap) {
+  if (is.infinite(hard_cap)) {
+    hard_cap_text <- "no"
+  } else {
+    hard_cap_text <- as.character(hard_cap)
+  }
+  ggplot(.data) +
+    geom_col(aes(x = units_permitted, y = pct), fill = "#663f5f") +
+    scale_y_continuous(
+      labels = scales::label_percent(accuracy = 1),
+      limits = c(0, 0.5)
+    ) +
+    labs(
+      title = "Distribution of units permitted per lot in RS zone",
+      subtitle = glue::glue(
+        "With {lot_size_per_unit} sqm lot size per unit and {hard_cap_text} maximum units"
+      ),
+      y = "Percent of lots",
+      x = "Units permitted",
+      caption = "Jacob Dawang, City of Edmonton Open Data"
+    )
+}
+
+p <- bind_rows(
+  calc_units_permitted_dist(assessment, 75, 8),
+  calc_units_permitted_dist(assessment, 80, 8),
+  calc_units_permitted_dist(assessment, 90, 8)
+) %>%
+  ggplot() +
+  geom_col(aes(x = units_permitted, y = pct), fill = "#663f5f") +
+  scale_y_continuous(
+    labels = scales::label_percent(accuracy = 1),
+    limits = c(0, 0.5)
+  ) +
+  scale_x_continuous(breaks = c(0:8)) +
+  transition_states(threshold, state_length = 3) +
+  labs(
+    title = "Distribution of units permitted per lot in RS zone",
+    subtitle = "With {closest_state} sqm lot size per unit and 8 maximum units",
+    y = "Percent of lots",
+    x = "Potential number of units permitted",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  )
+animate(p)
+```
+
+Maybe removing the eight-home hardcap would make up for this.
+@fig-units-permitted-no-hardcap shows the same animation as above, but with no eight-home hardcap.
+We can see that the lot area threshold is still very detrimental, pushing the number of lots that would permit eight homes or more way down.
+
+```{r}
+#| label: fig-units-permitted-no-hardcap
+#| fig-cap: Distribution of units permitted per lot in RS zone by lot size thresholds.
+p <- bind_rows(
+  calc_units_permitted_dist(assessment, 75, Inf),
+  calc_units_permitted_dist(assessment, 80, Inf),
+  calc_units_permitted_dist(assessment, 90, Inf)
+) %>%
+  ggplot() +
+  geom_col(aes(x = units_permitted, y = pct), fill = "#663f5f") +
+  scale_y_continuous(
+    labels = scales::label_percent(accuracy = 1),
+    limits = c(0, 0.5)
+  ) +
+  scale_x_continuous(
+    breaks = c(0:12),
+    limits = c(0, 12),
+    oob = scales::oob_keep,
+  ) +
+  transition_states(threshold, state_length = 3) +
+  labs(
+    title = "Distribution of units permitted per lot in RS zone",
+    subtitle = "With {closest_state} sqm lot size per unit and no maximum units",
+    y = "Percent of lots",
+    x = "Potential number of units permitted",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  )
+animate(p)
+```
+
+Let's map the thresholds.
+@fig-units-permitted-map shows every lot in the RS zone and the number of homes it would allow under the proposed lot area thresholds, assuming an eight-home hardcap.
+The clear issue here is that the larger lots are generally located away from transit, in areas that are not conducive to building infill rowhomes, and areas that have not seen much new construction at all.
+The biggest effect is around the Valley Line West, where at 90m^2^, wide swathes of land see reduced permissions.
+
+```{r}
+#| label: fig-units-permitted-map
+#| fig-cap: Distribution of units permitted per lot in RS zone by lot size thresholds.
+
+buffer1 <- lrt_stops %>%
+  st_buffer(units::as_units("0.8km")) %>%
+  st_union() %>%
+  st_boundary() %>%
+  st_sf() %>%
+  mutate(radius = "800m")
+
+p2 <- map(
+  c(75, 80, 90),
+  function(threshold) {
+    assessment %>%
+      filter(zoning == "RS") %>%
+      mutate(
+        units_permitted = pmin(floor(lot_size / threshold), 8),
+        threshold = threshold
+      )
+  }
+) %>%
+  bind_rows() %>%
+  ggplot() +
+  geom_sf(aes(colour = units_permitted), alpha = 0.5, size = 0.005) +
+  scale_colour_viridis_b(
+    option = "magma",
+    limits = c(0, 8),
+    breaks = c(1:8),
+    oob = scales::oob_squish,
+    guide = guide_colorsteps(position = "bottom")
+  ) +
+  transition_manual(threshold) +
+  geom_sf(
+    data = buffer1,
+    linetype = "solid",
+    colour = "black"
+  ) +
+  labs(
+    title = "Map of units permitted per lot and 800m LRT station radii",
+    subtitle = "With {current_frame} sqm per unit and maximum 8 units",
+    y = NULL,
+    colour = "Potential number of\nunits permitted",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  ) +
+  theme_dark() +
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank())
+animate(p2)
+```
+
+```{r}
+#| label: join-bp-assessment
+
+bp_lot_size_rs <- bp %>%
+  filter(year >= 2024, zoning == "RS") %>%
+  st_join(
+    assessment %>% select(lot_size, house_number, street_name),
+    join = st_nearest_feature
+  ) %>%
+  filter(!st_is_empty(.)) %>%
+  mutate(
+    over_threshold = fct(
+      case_when(
+        units_added * 80 > lot_size ~ "80sqm",
+        units_added * 90 > lot_size ~ "90sqm",
+        .default = ">90sqm"
+      ),
+      levels = c("80sqm", "90sqm", ">90sqm")
+    ),
+    distance_from_lrt = apply(
+      st_distance(
+        .,
+        lrt_stops,
+      ),
+      1,
+      min
+    ),
+    distance_from_nc = apply(
+      st_distance(
+        .,
+        nc
+      ),
+      1,
+      min
+    )
+  )
+```
+
+Not all lots are likely to be developed.
+We can take a look at building permits from the past couple years to get an idea of how these lot area thresholds would have retroactively affected them.
+@fig-map-lot-size-threshold is a map of all 5-8 home building permits in the RS zone in 2025, coloured by the lot area per unit threshold under which they would no longer be allowed.
+At the first threshold of 80m^2^, a cluster of permits around the university and Valley Line Southeast are no longer permit.
+The second threshold of 90m^2^ notably would no longer permit the cluster of permits along the Valley Line West, as well as the vast majority of the remaining 5-8 unit building permits.
+
+```{r}
+#| label: fig-map-lot-size-threshold
+#| fig-cap: Map of 5-8 unit building permits in the RS zone in 2025, coloured by which proposed lot size threshold would affect them.
+
+transit_buffer <- st_buffer(lrt_stops, units::as_units("0.8km")) %>%
+  st_filter(st_bbox(bp_lot_size_rs) %>% st_as_sfc()) %>%
+  st_union %>%
+  st_boundary() %>%
+  st_as_sf()
+bp_lot_size_rs %>%
+  filter(units_added >= 5) %>%
+  ggplot() +
+  geom_sf(aes(colour = over_threshold), size = 0.5) +
+  scale_colour_viridis_d(
+    option = "magma",
+    guide = guide_legend(position = "bottom")
+  ) +
+  geom_sf(
+    data = transit_buffer,
+    linetype = "solid",
+    colour = "black"
+  ) +
+  geom_sf(
+    data = lrt_stops %>% st_filter(transit_buffer),
+    shape = 21,
+    colour = "black",
+    fill = NA
+  ) +
+  geom_water() +
+  geom_roads() +
+  theme_dark() +
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank()) +
+  labs(
+    title = "Map of 5-8 unit building permits in the RS zone, 2024-25",
+    subtitle = "Coloured by which lot size per unit threshold would affect them",
+    colour = "Lot size threshold",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+We can tally up the number of permits and home that would no longer be permitted in their current form.
+@fig-permits-lost-bar hammers home this point: moving to a 90m^2^ would be like taking a sledgehammer to the RS zone.
+Applied retroactively, thousands of homes would not be allowed to be built in their current form, around 42% of homes permitted in the RS zone in the past two years.
+
+::: {.callout-caution}
+
+The plots below have different scales for the y-axis as the first one measures number of permits and the second one measures number of homes.
+
+:::
+
+```{r}
+#| label: fig-permits-lost-bar
+#| fig-cap: Number of permits and homes affected at various lot area thresholds by units added in permit
+#| fig-subcap:
+#|   - Number of permits affected
+#|   - Number of homes affected
+
+permits_lost <- bp_lot_size_rs %>%
+  group_by(units_added, over_threshold) %>%
+  summarize(n_permits = n(), n_homes = sum(units_added))
+
+ggplot(permits_lost) +
+  geom_col(aes(x = units_added, y = n_permits, fill = over_threshold)) +
+  scale_x_continuous(limits = c(0, 8.5), breaks = c(0:8)) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  scale_fill_viridis_d(option = "magma") +
+  theme_dark() +
+  scale_fill_viridis_d(
+    option = "magma",
+    guide = guide_legend(position = "bottom")
+  ) +
+  labs(
+    title = "Number of building permits in the RS zone by units in permit, 2024-25",
+    subtitle = "Coloured by which lot size per unit threshold would affect them",
+    x = "Units added in permit",
+    y = "Number of permits",
+    fill = "Lot size threshold",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  )
+
+ggplot(permits_lost) +
+  geom_col(aes(x = units_added, y = n_homes, fill = over_threshold)) +
+  scale_x_continuous(limits = c(0, 8.5), breaks = c(0:8)) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  scale_fill_viridis_d(
+    option = "magma",
+    guide = guide_legend(position = "bottom")
+  ) +
+  theme_dark() +
+  labs(
+    title = "Number of homes added in the RS zone by units in permit, 2024-25",
+    subtitle = "Coloured by which lot size per unit threshold affect permit them",
+    x = "Units added in permit",
+    y = "Number of homes",
+    fill = "Lot size threshold",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+In conclusion, increasing the lot area per unit to 80m^2^ would be a significant hit to the zoning bylaw, but 90m^2^ would be like taking a sledgehammer to it.
+
