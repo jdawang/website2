@@ -28,4 +28,6 @@ comments:
     repo: jdawang/website2
     input-position: top
     category: Comments
-    theme: preferred_color_scheme
+    theme:
+      light: github_light
+      dark: github_dark
