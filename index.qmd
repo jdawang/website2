@@ -22,4 +22,4 @@ about:
       href: "mailto:jacob@jacobdawang.com"
 ---
 
-Data scientist. Housing advocate. Rock climber. Cyclist.
+Your local data scientist and housing advocate
