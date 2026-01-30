@@ -29,5 +29,5 @@ comments:
     input-position: top
     category: Comments
     theme:
-      light: github_light
-      dark: github_dark
+      light: noborder_light
+      dark: noborder_dark
