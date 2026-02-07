@@ -1,0 +1,350 @@
+---
+title: "The nodes and corridors deception"
+date: "2026-02-07"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning, district planning]
+description: "In their report for the February 9 Urban Planning Committee, Administration claim that they expected a majority of redevelopment to occur in nodes and corridors. Is this moving the goalposts?"
+link-external-newwindow: true
+link-external-icon: false
+---
+
+I was reading [Administration's report for the February 9 Urban Planning Committee](https://pub-edmonton.escribemeetings.com/filestream.ashx?DocumentId=286737), where they will recommend reducing housing options, when one phrase struck me as really weird on page 4.
+
+> To achieve City Plan goals and intentions, the majority of redevelopment is planned to occur within the nodes and corridor network. This is important to achieve the The City Plan target of a 15-minute district supported by high-frequency transit, optimized infrastructure use and a vibrant mix of housing and employment that fosters a sustainable, climate-resilient urban form. Since The City Plan was approved in 2020, all but one year has seen the majority of redevelopment happen outside the node and corridor network.
+
+For those who follow Edmonton urban planning, this may seem par for the course as an Administration comment, but there's a new word used: "majority".
+Majority is very specific.
+It doesn't mean a lot.
+It doesn't mean a significant amount.
+It means more than 50%.
+
+So I went on a search of the City Plan for "majority" or "most" and there are exactly zero uses of these words in relation to nodes and corridors.
+To be even more thorough, I searched the City Plan for "nodes and corridors" and found, again, zero sentences claiming that the "majority" of redevelopment should occur in the nodes and corridors, much less within five years of the City Plan being approved.
+While Nodes and Corridors may have indeed not contained the majority of new housing construction since the City Plan was written in 2020, they were never intended to.
+
+Furthermore, the City Plan includes phasing according to population horizons that do not foresee even the start of a shift of development to Nodes and Corridors until after the 1.25 Million population horizon. Within the 1 to 1.25 Million population horizon, "Anticipated residential growth in the developing area will be guided by existing plan approvals such as Area Structure Plans and Neighbourhood Structure Plans. Anticipated growth in the redeveloping area will be strongly influenced by market demand and previously identified priorities with attached investment programs (e.g., Blatchford, downtown and Whyte Avenue)."
+
+It's only at the 1.25 to 1.5 Million population horizon that the City Plan plans for "Anticipated residential growth begins to reflect the shift in development that is needed to achieve the land use concept. Development accelerates in specific nodes and corridors in response to the activation activities that have taken place in the previous time horizon." (City Plan, p. 145) Even if Nodes and Corridors were intended to contain the majority of growth, the City Plan would never have intended for this to happen until later population horizons.
+
+Lastly, we can look at the data to provide more context around the last part of Administration's claim that "Since The City Plan was approved in 2020, all but one year has seen the majority of redevelopment happen outside the node and corridor network."
+They have produced a plot to support this claim that I have screenshotted in @fig-admin-graph.
+I will show using my own analysis of building permit data, that while this claim is technically correct, it is a selective and potentially misleading reading.  
+
+![Administration's plot](admin-graph.png){#fig-admin-graph}
+
+```{r}
+#| label: libaries
+
+library(tidyverse)
+library(sf)
+library(gt)
+library(mountainmathHelpers)
+library(gganimate)
+library(tidytransit)
+library(here)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path = Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key = Sys.getenv("NEXTZEN_API_KEY")
+)
+```
+
+
+```{r}
+#| label: data
+
+data_dir <- here("../../../data")
+
+mature_neighbourhood <- read_sf(here(
+  data_dir,
+  "Mature Neighbourhoods_20241222.geojson"
+)) %>%
+  rename(neighbourhood = neighbourh) %>%
+  filter(neighbourhood != "Downtown")
+
+henday <- read_sf(here(data_dir, "henday.geojson"))
+
+bp <- read_sf(here(data_dir, "General Building Permits_20260113/")) %>%
+  filter(year < 2026)
+
+crs <- lambert_conformal_conic_at(bp)
+henday <- st_transform(henday, crs)
+mature_neighbourhood <- st_transform(mature_neighbourhood, crs)
+
+nc <- read_sf(here(data_dir, "Nodes_and_Corridors_20260114.geojson")) %>%
+  st_transform(crs) %>%
+  select(nc_name = name, nc_type = type, node_or_corridor) %>%
+  mutate(
+    node_or_corridor = case_when(
+      str_detect(nc_type, fixed("node", ignore_case = TRUE)) ~ "Node",
+      .default = "Corridor"
+    )
+  )
+
+bp <- bp %>%
+  st_transform(crs) %>%
+  select(
+    -c(
+      count,
+      latitude,
+      longitude,
+      time_permi,
+      time_issue,
+      row_id,
+      date_permi,
+      neighbourh,
+      permit_num
+    ),
+    -contains("location")
+  ) %>%
+  rename(
+    construction_value = constructi,
+    month_number = month_numb,
+    building_type = building_t,
+    units_added = units_adde,
+    neighbourhood = neighbou_2,
+    job_category = job_catego,
+    job_description = job_descri,
+    date_issued = date_issue
+  ) %>%
+  filter(
+    units_added >= 1,
+    building_type %in%
+      c(
+        "Apartment (310)",
+        "Apartment Condos (315)",
+        "Apartments (310)",
+        "Backyard House (110)",
+        "Duplex (210)",
+        "Garden Suite (110)",
+        "Mixed Use (522)",
+        "Row House (330)",
+        "Row House Condo (335)",
+        "Row House Condos (335)",
+        "Row Houses (330)",
+        "Semi-Detached Condo (215)",
+        "Semi-Detached House (210)",
+        "Single Detached Condo (115)",
+        "Single Detached House (110)"
+      ),
+    work_type != "(04) Excavation",
+    #job_category != "Commercial Final"
+  ) %>%
+  mutate(
+    project_type = fct(
+      case_when(
+        (building_type %in%
+          c("Backyard House (110)", "Garden Suite (110)")) ~ "Backyard House",
+        (str_detect(work_type, coll("new", ignore_case = TRUE))) &
+          (units_added == 1) ~ "New SFH",
+        (work_type %in%
+          c(
+            "(03) Interior Alterations",
+            "(03) Exterior Alterations",
+            "(07) Add Suites to Single Dwelling",
+            "(08) Add Suites to Multi-Dwelling",
+            "(09) Convert Non-Res to Residential",
+            "(02) Addition",
+            "(12) Move Building on to Site"
+          )) ~ "Addition/Conversion",
+        between(units_added, 2, 4) ~ "Duplex to Fourplex",
+        between(units_added, 5, 8) ~ "Fiveplex to Eightplex",
+        str_detect(
+          building_type,
+          fixed("Row House", ignore_case = TRUE)
+        ) ~ "9+ Row House",
+        units_added >= 9 ~ "9+ Apartment",
+        .default = "I messed up"
+      ),
+      levels = c(
+        "New SFH",
+        "Addition/Conversion",
+        "Backyard House",
+        "Duplex to Fourplex",
+        "Fiveplex to Eightplex",
+        "9+ Row House",
+        "9+ Apartment"
+      )
+    ),
+    mature_neighbourhood = st_contains(
+      st_union(mature_neighbourhood),
+      .,
+      sparse = FALSE
+    )[1, ] &
+      !st_is_empty(.) &
+      !is.na(neighbourhood),
+    outside_henday = !st_contains(henday, ., sparse = FALSE)[1, ] &
+      !st_is_empty(.),
+    between_henday_mature = !st_is_empty(.) &
+      !mature_neighbourhood &
+      !outside_henday,
+    secondary_suite_desc = str_trim(
+      str_extract(
+        job_description,
+        regex("(\\d|a)? ?secondary suites?", ignore_case = TRUE)
+      )
+    ),
+    num_secondary_suites = case_when(
+      str_detect(secondary_suite_desc, "\\d") ~ as.numeric(str_extract(
+        secondary_suite_desc,
+        "\\d"
+      )),
+      str_to_lower(secondary_suite_desc) %in%
+        c(
+          "a secondary suite",
+          "secondary suite"
+        ) ~ 1,
+      str_to_lower(secondary_suite_desc) %in%
+        c(
+          "secondary suites",
+          "a secondary suites"
+        ) ~ units_added / 2,
+      .default = 0
+    ),
+    has_backyard_home = (str_detect(
+      job_description,
+      regex("garden suites?", ignore_case = TRUE)
+    ) |
+      str_detect(
+        job_description,
+        regex("backyard houses?", ignore_case = TRUE)
+      ))
+  ) %>%
+  mutate(
+    mature_neighbourhood = (mature_neighbourhood |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., mature_neighbourhood),
+              neighbourhood
+            )
+          )))),
+    outside_henday = (outside_henday |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., outside_henday),
+              neighbourhood
+            )
+          )))),
+    between_henday_mature = (between_henday_mature |
+      (!is.na(neighbourhood) &
+        (neighbourhood %in%
+          unique(
+            pull(
+              filter(., between_henday_mature),
+              neighbourhood
+            )
+          )))),
+    neighbourhood_type = fct(
+      case_when(
+        neighbourhood == "DOWNTOWN" ~ "Downtown",
+        mature_neighbourhood ~ "Mature",
+        outside_henday ~ "Outside Henday",
+        between_henday_mature ~ "Between mature and Henday",
+        neighbourhood %in%
+          c(
+            "THE HAMPTONS, GRANVILLE",
+            "RUTHERFORD, RUTHERFORD",
+            "THE UPLANDS, RIVER'S EDGE",
+            "ELLERSLIE INDUSTRIAL"
+          ) ~ "Outside Henday",
+        neighbourhood %in%
+          c(
+            "ELSINORE, ELSINORE",
+            "MICHAELS PARK",
+            "BRANDER GARDENS",
+            "PILOT SOUND AREA WEST PORTION, MCCONACHIE",
+            "YOUNGSTOWN INDUSTRIAL"
+          ) ~ "Between mature and Henday",
+        neighbourhood %in%
+          c(
+            "CENTRAL MCDOUGALL, QUEEN MARY PARK",
+            "WOODCROFT",
+            "BOYLE STREET",
+            "ELMWOOD"
+          ) ~ "Mature",
+        address %in%
+          c(
+            "8944 - 145 STREET NW",
+            "11216 - 122 STREET NW",
+            "9509 - 99B STREET NW"
+          ) ~ "Mature",
+        .default = NA_character_
+      ),
+      levels = c(
+        "Downtown",
+        "Mature",
+        "Between mature and Henday",
+        "Outside Henday"
+      )
+    ),
+    date_issued = as_date(date_issued)
+  ) %>%
+  st_join(nc, st_within) %>%
+  mutate(
+    node_or_corridor = replace_na(node_or_corridor, "Urban Mix"),
+    nc_type = replace_na(nc_type, "Urban Mix")
+  )
+```
+
+
+First, instead of looking at the _percentage_ of homes in nodes and corridors, let's look at the absolute number.
+@fig-nc-absolute splits building permits in mature neighbourhoods into two areas: nodes and corridors, and urban mix.
+I do confirm Administration's claim that since 2020, only 2022 had more homes permitted inside nodes and corridors than outside.
+However, **there are only three total years on record where nodes and corridors had more homes permitted than outside.**
+Moreover, in absolute numbers, the number of homes permitted in nodes and corridors has been on a steady increase.
+In fact, 2025 had the third most number of homes permitted in nodes and corridors!
+
+To reiterate:
+
+- Only three years since 2009 abided by a "majority" of redevelopment occurring in nodes and corridors.
+- The number of homes permitted in nodes and corridors in 2025 would be record setting, if not for 2020 and 2022.
+
+This does not support Administration's suggestion that nodes and corridors are in need of some help by decreasing development rights everywhere else.
+Nodes and corridors are doing better than ever.
+
+```{r}
+#| label: fig-nc-absolute
+#| fig-cap: Number of homes permitted in mature neighbourhoods by area type
+
+nc_dist <- bp %>%
+  st_drop_geometry() %>%
+  filter(!is.na(neighbourhood_type)) %>%
+  group_by(
+    year,
+    neighbourhood_type,
+    nc_f = fct_collapse(
+      node_or_corridor,
+      `Node or Corridor` = c("Node", "Corridor")
+    ),
+    .drop = FALSE
+  ) %>%
+  summarize(total = sum(units_added), num_projects = n(), .groups = "drop") %>%
+  filter(!is.na(nc_f))
+
+ggplot(nc_dist %>% filter(neighbourhood_type == "Mature")) +
+  geom_line(aes(x = year, y = total, colour = nc_f), linewidth = 1) +
+  labs(
+    colour = "Area type",
+    y = "Number of Homes",
+    title = "Number of homes permitted by area type",
+    subtitle = "Mature neighbourhoods, 2009-2025",
+    caption = "Jacob Dawang, City of Edmonton Open Data"
+  )
+```
+
+We can increase housing production in nodes and corridors.
+But, let's not do it by decreasing housing options in other places.
+If the City hasn't achieved its desired level of homes permitted in nodes and corridors, it's because it does not have a supportive enough policy for those areas.
+While some priority growth area rezonings went through in 2025, that's only a portion of land in nodes and corridors.
+Most projects in nodes and corridors still have to go through a lengthy rezoning process, with risk of a rejection at the very end.
+A good start would be initiating the rezonings of the rest of the priority growth areas.
+
+In addition, as I have [repeatedly written](../../2023/mckernan-belgravia-station/), there are not enough permissions for density around the LRT.
+Edmonton is a laggard on this front, and we really need to start development of a transit-oriented housing policy.
+
+At the end of the day, the right solution is making it easier to build in nodes and corridors, not harder to build everywhere else.
