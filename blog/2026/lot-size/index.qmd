@@ -1,6 +1,7 @@
 ---
 title: "Lot size per unit: a potentially dangerous regulation"
 date: "2026-01-26"
+date-modified: "2026-02-06"
 author: "Jacob Dawang"
 categories: [housing, edmonton, zoning]
 description: "Lot area per home has been suggested as a potential replacement for the eight-home hardcap in the RS zone. Looking at the data suggests this comes with some danger if tinkered with too much."
@@ -435,8 +436,7 @@ assessment %>%
   )
 ```
 
-By dividing lot size by the lot area per unit threshold, we can get a summarized view of how many potential homes each threshold would allow on each lot.
-First, assuming the eight-home hard cap remains, we can see the detrimental effect of increasing the lot area threshold in @fig-units-permitted-hardcap-8.
+By dividing lot size by the lot area per unit threshold, we can get a summarized view of how many potential homes each threshold would allow on each lot. First, assuming the eight-home hard cap remains, we can see the detrimental effect of increasing the lot area threshold in @fig-units-permitted-hardcap-8.
 
 ```{r}
 #| label: fig-units-permitted-hardcap-8
@@ -503,9 +503,7 @@ p <- bind_rows(
 animate(p)
 ```
 
-Maybe removing the eight-home hardcap would make up for this.
-@fig-units-permitted-no-hardcap shows the same animation as above, but with no eight-home hardcap.
-We can see that the lot area threshold is still very detrimental, pushing the number of lots that would permit eight homes or more way down.
+Maybe removing the eight-home hardcap would make up for this. @fig-units-permitted-no-hardcap shows the same animation as above, but with no eight-home hardcap. We can see that the lot area threshold is still very detrimental, pushing the number of lots that would permit eight homes or more way down.
 
 ```{r}
 #| label: fig-units-permitted-no-hardcap
@@ -537,10 +535,7 @@ p <- bind_rows(
 animate(p)
 ```
 
-Let's map the thresholds.
-@fig-units-permitted-map shows every lot in the RS zone and the number of homes it would allow under the proposed lot area thresholds, assuming an eight-home hardcap.
-The clear issue here is that the larger lots are generally located away from transit, in areas that are not conducive to building infill rowhomes, and areas that have not seen much new construction at all.
-The biggest effect is around the Valley Line West, where at 90m^2^, wide swathes of land see reduced permissions.
+Let's map the thresholds. @fig-units-permitted-map shows every lot in the RS zone and the number of homes it would allow under the proposed lot area thresholds, assuming an eight-home hardcap. The clear issue here is that the larger lots are generally located away from transit, in areas that are not conducive to building infill rowhomes, and areas that have not seen much new construction at all. The biggest effect is around the Valley Line West, where at 90m^2^, wide swathes of land see reduced permissions.
 
 ```{r}
 #| label: fig-units-permitted-map
@@ -630,11 +625,7 @@ bp_lot_size_rs <- bp %>%
   )
 ```
 
-Not all lots are likely to be developed.
-We can take a look at building permits from the past couple years to get an idea of how these lot area thresholds would have retroactively affected them.
-@fig-map-lot-size-threshold is a map of all 5-8 home building permits in the RS zone in 2025, coloured by the lot area per unit threshold under which they would no longer be allowed.
-At the first threshold of 80m^2^, a cluster of permits around the university and Valley Line Southeast are no longer permit.
-The second threshold of 90m^2^ notably would no longer permit the cluster of permits along the Valley Line West, as well as the vast majority of the remaining 5-8 unit building permits.
+Not all lots are likely to be developed. We can take a look at building permits from the past couple years to get an idea of how these lot area thresholds would have retroactively affected them. @fig-map-lot-size-threshold is a map of all 5-8 home building permits in the RS zone in 2025, coloured by the lot area per unit threshold under which they would no longer be allowed. At the first threshold of 80m^2^, a cluster of permits around the university and Valley Line Southeast are no longer permit. The second threshold of 90m^2^ notably would no longer permit the cluster of permits along the Valley Line West, as well as the vast majority of the remaining 5-8 unit building permits.
 
 ```{r}
 #| label: fig-map-lot-size-threshold
@@ -676,14 +667,10 @@ bp_lot_size_rs %>%
   )
 ```
 
-We can tally up the number of permits and home that would no longer be permitted in their current form.
-@fig-permits-lost-bar hammers home this point: moving to a 90m^2^ would be like taking a sledgehammer to the RS zone.
-Applied retroactively, thousands of homes would not be allowed to be built in their current form, around 42% of homes permitted in the RS zone in the past two years.
+We can tally up the number of permits and home that would no longer be permitted in their current form. @fig-permits-lost-bar hammers home this point: moving to a 90m^2^ would be like taking a sledgehammer to the RS zone. Applied retroactively, thousands of homes would not be allowed to be built in their current form, around 42% of homes permitted in the RS zone in the past two years.
 
-::: {.callout-caution}
-
+::: callout-caution
 The plots below have different scales for the y-axis as the first one measures number of permits and the second one measures number of homes.
-
 :::
 
 ```{r}
@@ -727,7 +714,7 @@ ggplot(permits_lost) +
   theme_dark() +
   labs(
     title = "Number of homes added in the RS zone by units in permit, 2024-25",
-    subtitle = "Coloured by which lot size per unit threshold affect permit them",
+    subtitle = "Coloured by which lot size per unit threshold affects them",
     x = "Units added in permit",
     y = "Number of homes",
     fill = "Lot size threshold",
@@ -736,4 +723,3 @@ ggplot(permits_lost) +
 ```
 
 In conclusion, increasing the lot area per unit to 80m^2^ would be a significant hit to the zoning bylaw, but 90m^2^ would be like taking a sledgehammer to it.
-
