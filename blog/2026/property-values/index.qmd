@@ -1,0 +1,484 @@
+---
+title: "Infill construction and property values in Edmonton"
+date: "2026-03-08"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning, property value]
+description: "Using a first-difference event study design, I find no evidence that nearby multi-unit infill construction reduces property appreciation rates in Edmonton's mature neighbourhoods — and some evidence it slightly accelerates them."
+link-external-newwindow: true
+link-external-icon: false
+draft: true
+---
+
+In a [previous post](../../2025/property-value-preliminary/), I showed some descriptive evidence that properties near new multi-unit buildings don't appreciate less than properties farther away. That analysis was intentionally preliminary: comparing group medians year-by-year doesn't account for the fact that infill tends to cluster in specific neighbourhoods, on specific lot types, and near properties that may already be on different value trajectories.
+
+This post applies more rigorous methods to the same question. Using a first-difference event study design, I control for all time-invariant differences across properties (location, lot size, age, neighbourhood character) and for city-wide appreciation trends.
+
+The answer is the same as the preliminary post: **there is no evidence that multi-unit infill construction reduces nearby property values**, across every specification.
+
+## Data
+
+All data are from Edmonton's open data portal.
+
+-   **Historical property assessment data**, 2015–2024. I filter for residential properties (`mill_class_1 == "RESIDENTIAL"`) with positive assessed values.
+-   **General building permit data**, 2009–2025. Filtered using the same criteria as the preliminary post: permits adding ≥1 unit, excluding excavation-only permits.
+-   **Mature neighbourhood boundaries** (2024 vintage).
+
+The treatment variable follows the preliminary post: a **multi-unit building permit** is one for ≥6 units, excluding new single-family homes, backyard houses, additions/conversions, and duplex-to-fourplex permits. A property is *treated* in assessment year $t$ if such a permit was issued within 50m in year $t - 1$, giving time for the building's presence to be reflected in assessed value.
+
+The sample is restricted to mature neighbourhoods (excluding Downtown), where infill has been most active.
+
+```{r}
+#| label: libraries
+#| message: false
+#| cache: false
+
+library(tidyverse)
+library(sf)
+library(gt)
+library(fixest)
+library(splines)
+library(marginaleffects)
+library(modelsummary)
+library(mountainmathHelpers)
+library(here)
+```
+
+```{r}
+#| label: data
+data_dir <- here("../../../data")
+
+historical <- read_rds(here(data_dir, "assessment_historical.rds")) %>%
+  filter(mill_class_1 == "RESIDENTIAL", assessed_value > 0)
+
+crs <- lambert_conformal_conic_at(historical)
+
+historical <- st_transform(historical, crs)
+
+mature_neighbourhood <- read_sf(here(
+  data_dir,
+  "Mature Neighbourhoods_20241222.geojson"
+)) %>%
+  rename(neighbourhood = neighbourh) %>%
+  filter(neighbourhood != "Downtown") %>%
+  st_transform(crs)
+
+bp_raw <- read_sf(here(data_dir, "General Building Permits_20260113/")) %>%
+  rename(
+    construction_value = constructi,
+    month_number = month_numb,
+    building_type = building_t,
+    units_added = units_adde,
+    neighbourhood = neighbou_2,
+    job_category = job_catego,
+    job_description = job_descri,
+    date_issued = date_issue
+  ) %>%
+  filter(!st_is_empty(.)) %>%
+  st_transform(crs)
+
+bp <- bp_raw %>%
+  filter(
+    units_added >= 1,
+    building_type %in%
+      c(
+        "Apartment (310)",
+        "Apartment Condos (315)",
+        "Apartments (310)",
+        "Backyard House (110)",
+        "Duplex (210)",
+        "Garden Suite (110)",
+        "Mixed Use (522)",
+        "Row House (330)",
+        "Row House Condo (335)",
+        "Row House Condos (335)",
+        "Row Houses (330)",
+        "Semi-Detached Condo (215)",
+        "Semi-Detached House (210)",
+        "Single Detached Condo (115)",
+        "Single Detached House (110)"
+      ),
+    work_type != "(04) Excavation"
+  ) %>%
+  mutate(
+    project_type = fct(
+      case_when(
+        building_type %in%
+          c("Backyard House (110)", "Garden Suite (110)") ~ "Backyard House",
+        str_detect(work_type, coll("new", ignore_case = TRUE)) &
+          units_added == 1 ~ "New SFH",
+        work_type %in%
+          c(
+            "(03) Interior Alterations",
+            "(03) Exterior Alterations",
+            "(07) Add Suites to Single Dwelling",
+            "(08) Add Suites to Multi-Dwelling",
+            "(09) Convert Non-Res to Residential",
+            "(02) Addition",
+            "(12) Move Building on to Site"
+          ) ~ "Addition/Conversion",
+        between(units_added, 2, 4) ~ "Duplex to Fourplex",
+        between(units_added, 5, 8) ~ "Fiveplex to Eightplex",
+        str_detect(
+          building_type,
+          fixed("Row House", ignore_case = TRUE)
+        ) ~ "9+ Row House",
+        units_added >= 9 ~ "9+ Apartment",
+        .default = "Other"
+      ),
+      levels = c(
+        "New SFH",
+        "Addition/Conversion",
+        "Backyard House",
+        "Duplex to Fourplex",
+        "Fiveplex to Eightplex",
+        "9+ Row House",
+        "9+ Apartment",
+        "Other"
+      )
+    )
+  )
+
+# Multi-unit permits: ≥6 units, not SFH/backyard/conversion/duplex-to-fourplex
+bp_multi <- bp %>%
+  filter(
+    units_added >= 6,
+    !project_type %in%
+      c(
+        "New SFH",
+        "Backyard House",
+        "Addition/Conversion",
+        "Duplex to Fourplex"
+      )
+  )
+
+# Sensitivity: ≥2 units, not SFH/backyard/conversion (includes duplex-to-fourplex)
+bp_multi_2plus <- bp %>%
+  filter(
+    units_added >= 2,
+    !project_type %in%
+      c(
+        "New SFH",
+        "Backyard House",
+        "Addition/Conversion"
+      )
+  )
+```
+
+```{r}
+#| label: mature-and-redeveloped
+# Properties in mature neighbourhoods (identified from 2024 geometries)
+mature_accounts <- historical %>%
+  filter(assessment_year == 2024) %>%
+  st_filter(st_union(mature_neighbourhood)) %>%
+  pull(account_number)
+
+# "Ever redeveloped" indicator: properties within 10m of any ≥6-unit permit
+# (the permit was issued on the property itself, not merely nearby)
+# Use all permits from 2014 onward (study period + 1 year prior)
+bp_multi_study <- bp_multi %>% filter(year >= 2014)
+
+assessment_2024 <- historical %>% filter(assessment_year == 2024)
+redeveloped_flags <- st_is_within_distance(
+  assessment_2024,
+  bp_multi_study,
+  dist = units::as_units("10 m"),
+  sparse = TRUE
+)
+redeveloped_accounts <- assessment_2024$account_number[
+  lengths(redeveloped_flags) > 0
+]
+```
+
+```{r}
+#| label: merge-data
+#| cache: true
+years_included <- 2015:2024
+merged_fn <- here(
+  "data",
+  glue::glue("merged_v2_{min(years_included)}_{max(years_included)}.rds")
+)
+dir.create(here("data"), showWarnings = FALSE)
+
+if (!file.exists(merged_fn)) {
+  process_year <- function(y) {
+    bp_y <- bp_multi %>% filter(year == y - 1)
+    bp_2plus_y <- bp_multi_2plus %>% filter(year == y - 1)
+    assessment_y <- historical %>% filter(assessment_year == y)
+
+    if (nrow(bp_y) == 0) {
+      units_multi_yn_col <- rep(0L, nrow(assessment_y))
+      dist_col <- rep(NA_real_, nrow(assessment_y))
+      units_permit_col <- rep(NA_real_, nrow(assessment_y))
+    } else {
+      nearest_idx <- st_nearest_feature(assessment_y, bp_y)
+      nearest_dist <- as.numeric(
+        st_distance(assessment_y, bp_y[nearest_idx, ], by_element = TRUE)
+      )
+      units_multi_yn_col <- as.integer(nearest_dist <= 50)
+      dist_col <- if_else(nearest_dist <= 500, nearest_dist, NA_real_)
+      units_permit_col <- if_else(
+        nearest_dist <= 50,
+        bp_y$units_added[nearest_idx],
+        NA_real_
+      )
+    }
+
+    if (nrow(bp_2plus_y) == 0) {
+      units_multi_2plus_yn_col <- rep(0L, nrow(assessment_y))
+    } else {
+      nearest_idx_2plus <- st_nearest_feature(assessment_y, bp_2plus_y)
+      nearest_dist_2plus <- as.numeric(
+        st_distance(
+          assessment_y,
+          bp_2plus_y[nearest_idx_2plus, ],
+          by_element = TRUE
+        )
+      )
+      units_multi_2plus_yn_col <- as.integer(nearest_dist_2plus <= 50)
+    }
+
+    assessment_y %>%
+      st_drop_geometry() %>%
+      mutate(
+        units_multi_yn = units_multi_yn_col,
+        dist_nearest_multi = dist_col,
+        units_nearest_permit = units_permit_col,
+        units_multi_2plus_yn = units_multi_2plus_yn_col
+      )
+  }
+
+  merged <- map(years_included, process_year) %>%
+    list_rbind() %>%
+    group_by(account_number) %>%
+    arrange(assessment_year) %>%
+    mutate(
+      d_log_assessment = log(assessed_value) - lag(log(assessed_value))
+    ) %>%
+    ungroup() %>%
+    write_rds(merged_fn)
+} else {
+  merged <- read_rds(merged_fn)
+}
+```
+
+```{r}
+#| label: prep-data
+prepped <- merged %>%
+  filter(account_number %in% mature_accounts) %>%
+  group_by(account_number) %>%
+  arrange(assessment_year) %>%
+  mutate(
+    units_multi_yn = replace_na(units_multi_yn, 0L),
+    units_multi_2plus_yn = replace_na(units_multi_2plus_yn, 0L),
+    first_year_treated = min(
+      if_else(units_multi_yn == 1L, assessment_year, Inf),
+      na.rm = TRUE
+    ),
+    rel_year = assessment_year - first_year_treated,
+    # Bin tails for event study display
+    rel_year_binned = pmax(pmin(rel_year, 4), -4)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    ever_redeveloped = account_number %in% redeveloped_accounts
+  )
+
+# "Always-SFH" subsample: never had a multi-unit permit issued on the property itself
+prepped_sfh <- prepped %>% filter(!ever_redeveloped)
+```
+
+## Methods
+
+The preliminary post compared median property value changes between a "treated" group (nearby multi-unit permit) and a "control" group. The limitation is that treated and control properties may differ systematically: infill tends to cluster in specific neighbourhoods, on certain street types, and near properties that may already be on different value trajectories.
+
+A first-difference (FD) approach addresses this by using each property's *year-over-year change in log assessed value* as the outcome. Time-invariant differences between properties — location, lot size, year built — cancel out in differencing, because they affect value levels equally in every year. A neighbourhood × year fixed effect absorbs both city-wide appreciation trends and neighbourhood-specific appreciation dynamics, comparing treated and control properties *within the same neighbourhood in the same year*. This removes bias from infill clustering in already-appreciating areas. The parallel trends assumption is weaker than in a levels regression: it requires only that treated and control properties within the same neighbourhood would have appreciated at similar *rates* absent treatment, not that they were on parallel value *levels*.
+
+The event study estimates separate effects at each point in time relative to the first nearby permit: $t = -4, -3, -2, -1$ (pre-treatment), and $t = 0, +1, +2, +3, +4$ (post-treatment). If the parallel trends assumption holds — i.e., treated and control properties in the same neighbourhood would have followed similar appreciation rate trajectories absent treatment — the pre-treatment coefficients should be near zero. Flat pre-trends are not proof of causality, but they are necessary evidence for it.
+
+I use the Sun-Abraham (2021) estimator (`sunab()` in the `fixest` package), which is robust to heterogeneous treatment effects across cohorts — important here because properties receive their first nearby permit in different years throughout 2015–2024.
+
+## Results
+
+Each analysis below is shown for two samples side by side. The **all residential** sample covers all residential properties in mature neighbourhoods. The **always-SFH** sample excludes any property that ever had a ≥6-unit permit issued within 10m of itself during the study period — removing properties approaching redevelopment, which tend to be assessed near land value and cluster near new infill. The always-SFH sample most directly answers the policy question: *does building apartments next door hurt my house's value?*
+
+
+```{r}
+#| label: tbl-fd
+#| tbl-cap: "First-difference estimates: effect of nearby multi-unit permit on year-over-year log assessed value change. All models use neighbourhood × year fixed effects."
+m_fd_main <- feols(
+  d_log_assessment ~ units_multi_yn | neighbourhood_name^assessment_year,
+  data = prepped %>% filter(!is.na(d_log_assessment)),
+  cluster = ~account_number
+)
+
+m_fd_sfh <- feols(
+  d_log_assessment ~ units_multi_yn | neighbourhood_name^assessment_year,
+  data = prepped_sfh %>% filter(!is.na(d_log_assessment)),
+  cluster = ~account_number
+)
+
+m_fd_main_2plus <- feols(
+  d_log_assessment ~ units_multi_2plus_yn | neighbourhood_name^assessment_year,
+  data = prepped %>% filter(!is.na(d_log_assessment)),
+  cluster = ~account_number
+)
+
+m_fd_sfh_2plus <- feols(
+  d_log_assessment ~ units_multi_2plus_yn | neighbourhood_name^assessment_year,
+  data = prepped_sfh %>% filter(!is.na(d_log_assessment)),
+  cluster = ~account_number
+)
+
+modelsummary(
+  list(
+    "All residential\n(≥6 units)" = m_fd_main,
+    "Always-SFH\n(≥6 units)" = m_fd_sfh,
+    "All residential\n(≥2 units)" = m_fd_main_2plus,
+    "Always-SFH\n(≥2 units)" = m_fd_sfh_2plus
+  ),
+  coef_map = c(
+    "units_multi_yn" = "Multi-unit permit within 50m (≥6 units)",
+    "units_multi_2plus_yn" = "Multi-unit permit within 50m (≥2 units)"
+  ),
+  statistic = "conf.int",
+  conf_level = 0.95,
+  fmt = 4,
+  gof_map = list(
+    list(raw = "nobs", clean = "Observations", fmt = scales::label_comma()),
+    list(
+      raw = "FE: neighbourhood_name^assessment_year",
+      clean = "Neighbourhood × year FE",
+      fmt = NULL
+    )
+  ),
+  notes = "Standard errors clustered by property. 95% confidence intervals in brackets."
+)
+```
+
+The always-SFH estimates (both thresholds) are near zero — consistent with no effect on stable single-family homes. The all-residential estimates are near zero or slightly positive: properties near new multi-unit permits appreciate at similar or slightly faster rates on average, not slower. The ≥2-unit columns show that the null result holds for smaller infill types (including duplex-to-fourplex), not just large apartment buildings.
+
+The first-difference event studies (@fig-es-fd-main and @fig-es-fd-sfh) test whether appreciation *rates* were diverging before treatment. The always-SFH pre-trends are flat, and post-treatment estimates are near zero throughout — a clean null result. The all-residential event study tells a more revealing story: there is a large positive spike at $t = 0$, which then reverts to near zero. This spike is almost certainly driven by properties approaching redevelopment in the all-residential sample: when a multi-unit permit appears nearby, properties that are themselves candidates for demolition see an immediate reassessment of their land value. The always-SFH exclusion removes this effect entirely, confirming that stable single-family homes see no change in appreciation rates. See @tbl-es-fd-sample for treated-observation counts by cohort and relative year.
+
+```{r}
+#| label: fig-es-fd-main
+#| fig-cap: "First-difference event study: all residential properties"
+es_fd_main <- feols(
+  d_log_assessment ~ sunab(first_year_treated, assessment_year) |
+    neighbourhood_name^assessment_year,
+  data = prepped %>% filter(!is.na(d_log_assessment)),
+  cluster = ~account_number
+)
+
+iplot(
+  es_fd_main,
+  xlab = "Years relative to first nearby permit (≥6 units, within 50m)",
+  main = "",
+  ci_level = 0.95
+)
+abline(v = -0.5, lty = 2, col = "grey50")
+```
+
+```{r}
+#| label: fig-es-fd-sfh
+#| fig-cap: "First-difference event study: always-SFH properties"
+es_fd_sfh <- feols(
+  d_log_assessment ~ sunab(first_year_treated, assessment_year) |
+    neighbourhood_name^assessment_year,
+  data = prepped_sfh %>% filter(!is.na(d_log_assessment)),
+  cluster = ~account_number
+)
+
+iplot(
+  es_fd_sfh,
+  xlab = "Years relative to first nearby permit (≥6 units, within 50m)",
+  main = "",
+  ci_level = 0.95
+)
+abline(v = -0.5, lty = 2, col = "grey50")
+```
+
+```{r}
+#| label: tbl-es-fd-sample
+#| tbl-cap: "First-difference event study: treated observations per cohort and relative year"
+ry_max <- 8L
+ry_labs <- c(paste0("-", ry_max:1), "0", paste0("+", 1:ry_max))
+
+make_es_counts <- function(data) {
+  data %>%
+    filter(is.finite(first_year_treated)) %>%
+    mutate(
+      cohort = as.integer(first_year_treated),
+      ry = as.integer(rel_year),
+      ry_lab = case_when(
+        ry > 0L ~ paste0("+", ry),
+        ry == 0L ~ "0",
+        TRUE ~ as.character(ry)
+      )
+    ) %>%
+    filter(between(ry, -ry_max, ry_max)) %>%
+    count(cohort, ry_lab) %>%
+    pivot_wider(names_from = ry_lab, values_from = n, values_fill = 0L) %>%
+    select(cohort, any_of(ry_labs)) %>%
+    arrange(cohort)
+}
+
+bind_rows(
+  make_es_counts(prepped %>% filter(!is.na(d_log_assessment))) %>%
+    mutate(sample = "All residential"),
+  make_es_counts(prepped_sfh %>% filter(!is.na(d_log_assessment))) %>%
+    mutate(sample = "Always-SFH")
+) %>%
+  gt(groupname_col = "sample") %>%
+  cols_label(cohort = "Cohort") %>%
+  tab_spanner(
+    label = "Pre-treatment (relative year)",
+    columns = any_of(paste0("-", ry_max:1))
+  ) %>%
+  tab_spanner(
+    label = "Post-treatment (relative year)",
+    columns = any_of(c("0", paste0("+", 1:ry_max)))
+  ) %>%
+  sub_zero(zero_text = "—") %>%
+  tab_options(table.font.size = "small")
+```
+
+@fig-es-fd-sfh-robust repeats the always-SFH FD event study restricted to cohorts 2017 and later — the earliest cohort with at least one pre-treatment FD observation. The result is unchanged: all estimates are statistically indistinguishable from zero throughout the full time horizon, with no systematic trend.
+
+```{r}
+#| label: fig-es-fd-sfh-robust
+#| fig-cap: "First-difference event study: always-SFH, cohorts 2017 and later only (cohorts 2015–2016 excluded — no pre-treatment data in FD sample)"
+es_fd_sfh_robust <- feols(
+  d_log_assessment ~ sunab(first_year_treated, assessment_year) |
+    neighbourhood_name^assessment_year,
+  data = prepped_sfh %>%
+    filter(!is.na(d_log_assessment), first_year_treated > 2016),
+  cluster = ~account_number
+)
+
+iplot(
+  es_fd_sfh_robust,
+  xlab = "Years relative to first nearby permit (≥6 units, within 50m)",
+  main = "",
+  ci_level = 0.95
+)
+abline(v = -0.5, lty = 2, col = "grey50")
+```
+
+
+## Caveats
+
+**Parallel trends is untestable.** Flat pre-trends are necessary but not sufficient evidence for a causal interpretation. A time-varying confounder that begins exactly when the permit is issued — say, a developer specifically targeting blocks that are about to appreciate for unrelated reasons — could still bias the estimates. The flat pre-trends make this story less plausible, but it cannot be ruled out.
+
+**Developer selection likely biases toward finding a positive effect.** If developers preferentially site multi-unit builds near properties that are already appreciating (e.g., near amenities, on major streets), the "treated" group would be expected to appreciate faster even without the infill. This would work against finding a null result, making the null finding more conservative, not less.
+
+**Assessed value is not sale price.** Edmonton's assessment data reflects the city's model of market value, not observed transactions. City-wide assessment methodology changes are absorbed by year fixed effects, but property-specific reassessment events are not. Using only properties where the same assessment method applies across all years would be a useful robustness check.
+
+**One-year lag.** The treatment indicator uses permits issued in year $t-1$ to predict assessments in year $t$. Construction timelines vary — larger buildings may take two or more years to complete — so some effects may be lagged further than the specification captures. The event study, which shows no effect even 4+ years post-permit, addresses this concern.
+
+**The always-SFH sample conditions on an endogenous outcome.** The always-SFH sample excludes properties that were themselves eventually redeveloped within 10m of a ≥6-unit permit during the study period. If infill pressure causes adjacent properties to sell and redevelop, this exclusion removes potentially affected properties. The always-SFH estimates should therefore be interpreted as the effect on properties that did not experience redevelopment pressure — a well-defined and policy-relevant group, but not a random subset. The bias direction is ambiguous but likely toward a more null result.
+
+## Conclusion
+
+Using year-over-year appreciation as the outcome, there is no evidence that multi-unit infill construction reduces neighbouring property values in Edmonton's mature neighbourhoods. The always-SFH estimates are near zero across both the ≥6-unit and ≥2-unit thresholds, and the all-residential estimates are near zero or slightly positive. The event study shows flat pre-trends and no post-treatment decline for stable single-family homes across the full post-treatment window. The all-residential sample does show a large positive spike at $t = 0$, almost certainly driven by properties approaching redevelopment being reassessed at land value — but this is a selection artefact that disappears in the always-SFH sample, confirming that stable homes are unaffected. All specifications use neighbourhood × year fixed effects, comparing treated and control properties within the same neighbourhood and year.
+
+This is consistent with the [preliminary post](../../2025/property-value-preliminary/) and with a growing literature finding that upzoning and infill construction do not harm existing homeowners. The fear that new apartments will hurt house prices is not supported by Edmonton's own data. It should not be a reason to restrict where housing can be built.
