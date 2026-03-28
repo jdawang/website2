@@ -6,20 +6,22 @@ categories: [housing, edmonton, zoning, property value]
 description: "Using a first-difference event study design, I find no evidence that nearby multi-unit infill construction reduces property appreciation rates in Edmonton's mature neighbourhoods — and some evidence it slightly accelerates them."
 link-external-newwindow: true
 link-external-icon: false
-draft: true
+draft: false
+execute: 
+  cache: refresh
 ---
 
 In a [previous post](../../2025/property-value-preliminary/), I showed some descriptive evidence that properties near new multi-unit buildings don't appreciate less than properties farther away. That analysis was intentionally preliminary: comparing group medians year-by-year doesn't account for the fact that infill tends to cluster in specific neighbourhoods, on specific lot types, and near properties that may already be on different value trajectories.
 
 This post applies more rigorous methods to the same question. Using a first-difference event study design, I control for all time-invariant differences across properties (location, lot size, age, neighbourhood character) and for city-wide appreciation trends.
 
-The answer is the same as the preliminary post: **there is no evidence that multi-unit infill construction reduces nearby property values**, across every specification.
+The answer is the same as the preliminary post: **there is no evidence that multi-unit infill construction reduces nearby property values** — and across every specification, the estimates point in the opposite direction.
 
 ## Data
 
 All data are from Edmonton's open data portal.
 
--   **Historical property assessment data**, 2015–2024. I filter for residential properties (`mill_class_1 == "RESIDENTIAL"`) with positive assessed values.
+-   **Historical property assessment data**, 2015–2026. I filter for residential properties (`mill_class_1 == "RESIDENTIAL"`) with positive assessed values. Data for 2015–2024 come from a combined historical RDS; 2025 is a separate GeoJSON; 2026 requires joining a property-information shapefile (geometries) with a separate assessment CSV.
 -   **General building permit data**, 2009–2025. Filtered using the same criteria as the preliminary post: permits adding ≥1 unit, excluding excavation-only permits.
 -   **Mature neighbourhood boundaries** (2024 vintage).
 
@@ -48,11 +50,65 @@ library(here)
 data_dir <- here("../../../data")
 
 historical <- read_rds(here(data_dir, "assessment_historical.rds")) %>%
-  filter(mill_class_1 == "RESIDENTIAL", assessed_value > 0)
+  filter(mill_class_1 == "RESIDENTIAL", assessed_value > 0) %>%
+  mutate(
+    account_number = as.character(as.integer(account_number)),
+    assessment_year = as.integer(assessment_year)
+  )
 
 crs <- lambert_conformal_conic_at(historical)
 
 historical <- st_transform(historical, crs)
+
+# 2025: same schema as historical, but GeoJSON stores all values as character
+assessment_2025 <- read_sf(here(data_dir, "assessment_2025.geojson")) %>%
+  mutate(
+    account_number = as.character(as.integer(as.numeric(account_number))),
+    assessment_year = as.integer(assessment_year),
+    assessed_value = as.numeric(assessed_value)
+  ) %>%
+  filter(mill_class_1 == "RESIDENTIAL", assessed_value > 0) %>%
+  st_transform(crs)
+
+# 2026: join geometry shapefile with assessment CSV
+property_info_2026 <- read_sf(
+  here(data_dir, "Property Information (Current Calendar Year)_20260113")
+) %>%
+  st_transform(crs) %>%
+  rename(account_number = account_nu, neighbourhood_name = neighbou_2)
+
+assessment_values_2026 <- read_csv(
+  here(
+    data_dir,
+    "Property_Assessment_Data_(Current_Calendar_Year)_20260308.csv"
+  ),
+  show_col_types = FALSE
+) %>%
+  rename(
+    account_number = `Account Number`,
+    assessed_value = `Assessed Value`,
+    mill_class_1 = `Assessment Class 1`
+  ) %>%
+  mutate(account_number = as.character(as.integer(account_number))) %>%
+  filter(mill_class_1 == "RESIDENTIAL", assessed_value > 0)
+
+assessment_2026 <- property_info_2026 %>%
+  inner_join(
+    assessment_values_2026 %>% select(account_number, assessed_value, mill_class_1),
+    by = "account_number"
+  ) %>%
+  mutate(assessment_year = 2026L)
+
+# Combine all years — keep only columns needed for the analysis
+analysis_cols <- c(
+  "account_number", "assessment_year", "assessed_value",
+  "mill_class_1", "neighbourhood_name"
+)
+historical <- bind_rows(
+  historical %>% select(all_of(analysis_cols)),
+  assessment_2025 %>% select(all_of(analysis_cols)),
+  assessment_2026 %>% select(all_of(analysis_cols))
+)
 
 mature_neighbourhood <- read_sf(here(
   data_dir,
@@ -168,7 +224,7 @@ bp_multi_2plus <- bp %>%
 #| label: mature-and-redeveloped
 # Properties in mature neighbourhoods (identified from 2024 geometries)
 mature_accounts <- historical %>%
-  filter(assessment_year == 2024) %>%
+  filter(assessment_year == 2026) %>%
   st_filter(st_union(mature_neighbourhood)) %>%
   pull(account_number)
 
@@ -177,14 +233,14 @@ mature_accounts <- historical %>%
 # Use all permits from 2014 onward (study period + 1 year prior)
 bp_multi_study <- bp_multi %>% filter(year >= 2014)
 
-assessment_2024 <- historical %>% filter(assessment_year == 2024)
+assessment_2026_sf <- historical %>% filter(assessment_year == 2026)
 redeveloped_flags <- st_is_within_distance(
-  assessment_2024,
+  assessment_2026_sf,
   bp_multi_study,
   dist = units::as_units("10 m"),
   sparse = TRUE
 )
-redeveloped_accounts <- assessment_2024$account_number[
+redeveloped_accounts <- assessment_2026_sf$account_number[
   lengths(redeveloped_flags) > 0
 ]
 ```
@@ -192,10 +248,10 @@ redeveloped_accounts <- assessment_2024$account_number[
 ```{r}
 #| label: merge-data
 #| cache: true
-years_included <- 2015:2024
+years_included <- 2015:2026
 merged_fn <- here(
   "data",
-  glue::glue("merged_v2_{min(years_included)}_{max(years_included)}.rds")
+  glue::glue("merged_v3_{min(years_included)}_{max(years_included)}.rds")
 )
 dir.create(here("data"), showWarnings = FALSE)
 
@@ -295,12 +351,11 @@ A first-difference (FD) approach addresses this by using each property's *year-o
 
 The event study estimates separate effects at each point in time relative to the first nearby permit: $t = -4, -3, -2, -1$ (pre-treatment), and $t = 0, +1, +2, +3, +4$ (post-treatment). If the parallel trends assumption holds — i.e., treated and control properties in the same neighbourhood would have followed similar appreciation rate trajectories absent treatment — the pre-treatment coefficients should be near zero. Flat pre-trends are not proof of causality, but they are necessary evidence for it.
 
-I use the Sun-Abraham (2021) estimator (`sunab()` in the `fixest` package), which is robust to heterogeneous treatment effects across cohorts — important here because properties receive their first nearby permit in different years throughout 2015–2024.
+I use the Sun-Abraham (2021) estimator (`sunab()` in the `fixest` package), which is robust to heterogeneous treatment effects across cohorts — important here because properties receive their first nearby permit in different years throughout 2015–2025.
 
 ## Results
 
 Each analysis below is shown for two samples side by side. The **all residential** sample covers all residential properties in mature neighbourhoods. The **always-SFH** sample excludes any property that ever had a ≥6-unit permit issued within 10m of itself during the study period — removing properties approaching redevelopment, which tend to be assessed near land value and cluster near new infill. The always-SFH sample most directly answers the policy question: *does building apartments next door hurt my house's value?*
-
 
 ```{r}
 #| label: tbl-fd
@@ -355,9 +410,9 @@ modelsummary(
 )
 ```
 
-The always-SFH estimates (both thresholds) are near zero — consistent with no effect on stable single-family homes. The all-residential estimates are near zero or slightly positive: properties near new multi-unit permits appreciate at similar or slightly faster rates on average, not slower. The ≥2-unit columns show that the null result holds for smaller infill types (including duplex-to-fourplex), not just large apartment buildings.
+The always-SFH estimate for the main specification (≥6 units) is +0.005 (95% CI \[0.003, 0.008\]) — stable single-family homes near new apartment buildings appreciate *faster* than comparable properties in the same neighbourhood in the same year, not slower. The all-residential estimate is also positive (+0.012, 95% CI \[0.008, 0.015\]). The ≥2-unit estimates are much larger (+0.034–0.035). These likely reflect property-level selection: duplexes and fourplexes tend to be built on the most desirable streets *within* a neighbourhood, so properties within 50m of ≥2-unit permits are positively selected on within-neighbourhood appreciation. The neighbourhood × year FE removes between-neighbourhood sorting but not this finer-grained street-level selection. The ≥6-unit specification is less subject to this concern and remains the primary estimate.
 
-The first-difference event studies (@fig-es-fd-main and @fig-es-fd-sfh) test whether appreciation *rates* were diverging before treatment. The always-SFH pre-trends are flat, and post-treatment estimates are near zero throughout — a clean null result. The all-residential event study tells a more revealing story: there is a large positive spike at $t = 0$, which then reverts to near zero. This spike is almost certainly driven by properties approaching redevelopment in the all-residential sample: when a multi-unit permit appears nearby, properties that are themselves candidates for demolition see an immediate reassessment of their land value. The always-SFH exclusion removes this effect entirely, confirming that stable single-family homes see no change in appreciation rates. See @tbl-es-fd-sample for treated-observation counts by cohort and relative year.
+The first-difference event studies (@fig-es-fd-main and @fig-es-fd-sfh) test whether appreciation *rates* were diverging before treatment. The always-SFH pre-trends are flat and post-treatment estimates are near zero or mildly positive throughout — consistent with no negative effect on stable single-family homes. The all-residential event study tells a more revealing story: there is a large positive spike at $t = 0$, which then reverts toward the aggregate estimate. This spike is almost certainly driven by properties approaching redevelopment in the all-residential sample: when a multi-unit permit appears nearby, properties that are themselves candidates for demolition see an immediate reassessment of their land value. See @tbl-es-fd-sample for treated-observation counts by cohort and relative year.
 
 ```{r}
 #| label: fig-es-fd-main
@@ -442,7 +497,7 @@ bind_rows(
   tab_options(table.font.size = "small")
 ```
 
-@fig-es-fd-sfh-robust repeats the always-SFH FD event study restricted to cohorts 2017 and later — the earliest cohort with at least one pre-treatment FD observation. The result is unchanged: all estimates are statistically indistinguishable from zero throughout the full time horizon, with no systematic trend.
+@fig-es-fd-sfh-robust repeats the always-SFH FD event study restricted to cohorts 2017 and later — the earliest cohort with at least one pre-treatment FD observation. The result is unchanged: pre-treatment estimates are flat, and there is no post-treatment decline at any point in the time horizon.
 
 ```{r}
 #| label: fig-es-fd-sfh-robust
@@ -464,21 +519,20 @@ iplot(
 abline(v = -0.5, lty = 2, col = "grey50")
 ```
 
-
 ## Caveats
 
 **Parallel trends is untestable.** Flat pre-trends are necessary but not sufficient evidence for a causal interpretation. A time-varying confounder that begins exactly when the permit is issued — say, a developer specifically targeting blocks that are about to appreciate for unrelated reasons — could still bias the estimates. The flat pre-trends make this story less plausible, but it cannot be ruled out.
 
-**Developer selection likely biases toward finding a positive effect.** If developers preferentially site multi-unit builds near properties that are already appreciating (e.g., near amenities, on major streets), the "treated" group would be expected to appreciate faster even without the infill. This would work against finding a null result, making the null finding more conservative, not less.
+**Developer selection likely biases toward finding a positive effect.** If developers preferentially site multi-unit builds near properties that are already appreciating (e.g., near amenities, on major streets), the "treated" group would be expected to appreciate faster even without the infill. The neighbourhood × year FE controls for neighbourhood-level appreciation trends, but within-neighbourhood street-level selection may remain — particularly for the ≥2-unit threshold. The positive estimates for the ≥6-unit specification should therefore be interpreted as an upper bound on the causal effect: the true effect is at most mildly positive, and could be zero.
 
 **Assessed value is not sale price.** Edmonton's assessment data reflects the city's model of market value, not observed transactions. City-wide assessment methodology changes are absorbed by year fixed effects, but property-specific reassessment events are not. Using only properties where the same assessment method applies across all years would be a useful robustness check.
 
-**One-year lag.** The treatment indicator uses permits issued in year $t-1$ to predict assessments in year $t$. Construction timelines vary — larger buildings may take two or more years to complete — so some effects may be lagged further than the specification captures. The event study, which shows no effect even 4+ years post-permit, addresses this concern.
+**One-year lag.** The treatment indicator uses permits issued in year $t-1$ to predict assessments in year $t$. Construction timelines vary — larger buildings may take two or more years to complete — so some effects may be lagged further than the specification captures. The event study, which shows no negative effect even 4+ years post-permit, addresses this concern.
 
 **The always-SFH sample conditions on an endogenous outcome.** The always-SFH sample excludes properties that were themselves eventually redeveloped within 10m of a ≥6-unit permit during the study period. If infill pressure causes adjacent properties to sell and redevelop, this exclusion removes potentially affected properties. The always-SFH estimates should therefore be interpreted as the effect on properties that did not experience redevelopment pressure — a well-defined and policy-relevant group, but not a random subset. The bias direction is ambiguous but likely toward a more null result.
 
 ## Conclusion
 
-Using year-over-year appreciation as the outcome, there is no evidence that multi-unit infill construction reduces neighbouring property values in Edmonton's mature neighbourhoods. The always-SFH estimates are near zero across both the ≥6-unit and ≥2-unit thresholds, and the all-residential estimates are near zero or slightly positive. The event study shows flat pre-trends and no post-treatment decline for stable single-family homes across the full post-treatment window. The all-residential sample does show a large positive spike at $t = 0$, almost certainly driven by properties approaching redevelopment being reassessed at land value — but this is a selection artefact that disappears in the always-SFH sample, confirming that stable homes are unaffected. All specifications use neighbourhood × year fixed effects, comparing treated and control properties within the same neighbourhood and year.
+Using year-over-year appreciation as the outcome, there is no evidence that multi-unit infill construction reduces neighbouring property values in Edmonton's mature neighbourhoods — and consistent evidence that it does not. The always-SFH estimate for the primary specification (≥6 units, neighbourhood × year FE) is +0.005 \[0.003, 0.008\]: stable single-family homes near new apartment buildings appreciate slightly *faster* than comparable properties in the same neighbourhood in the same year. The all-residential estimate is also positive (+0.012). The event study shows flat pre-trends and no post-treatment decline for stable single-family homes. The all-residential sample does show a large positive spike at $t = 0$, almost certainly driven by properties approaching redevelopment being reassessed at land value — but this is a selection artefact, not a causal effect on stable homes.
 
 This is consistent with the [preliminary post](../../2025/property-value-preliminary/) and with a growing literature finding that upzoning and infill construction do not harm existing homeowners. The fear that new apartments will hurt house prices is not supported by Edmonton's own data. It should not be a reason to restrict where housing can be built.
