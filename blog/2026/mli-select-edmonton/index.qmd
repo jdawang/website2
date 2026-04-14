@@ -1,0 +1,415 @@
+---
+title: "Edmonton's zoning reform created hundreds of affordable homes"
+date: "2026-04-06"
+author: "Jacob Dawang"
+categories: [housing, edmonton, affordability]
+description: "Edmonton's 2024 Zoning Bylaw Renewal unlocked federal affordable housing financing. An analysis of CMHC MLI Select data shows Edmonton's rezoning has already generated hundreds of mandated-affordable units."
+link-external-newwindow: true
+link-external-icon: false
+bibliography: references.bib
+draft: false
+execute: 
+  cache: false
+---
+
+In [a recent Substack post](https://marklocki.substack.com/p/the-affordable-housing-cost-of-repealing), Mark Locki showed that Calgary's August 2024 blanket rezoning was enabling small infill projects to access CMHC's MLI Select program, a federal mortgage insurance program that, in exchange for favourable financing, requires a portion of units to be rented at affordable rates. His analysis found that 39% of all 4–8 unit building permits in Calgary's established communities were backed by MLI Select financing.
+
+Edmonton's Zoning Bylaw Renewal (ZBR), which came into force in January 2024, works through the same mechanism. And thanks to data I obtained through an Access to Information and Privacy (ATIP) request, we can now quantify its impact.
+
+tl;dr: Edmonton's ZBR has already generated an estimated 480 mandated-affordable units through MLI Select financing, units that would not exist without rezoning.
+
+## What is MLI Select?
+
+CMHC's MLI Select program provides favourable mortgage insurance to rental housing developers in exchange for commitments to affordability, energy efficiency, and accessibility. Crucially for small infill projects, it allows developers to borrow up to 95% of project costs, dramatically reducing the equity required upfront.
+
+The affordability requirements are tiered:
+
+| MLI Select level | Units required at ≤30% of median renter income | Max loan-to-cost | Max amortization | Insurance discount |
+|---------------|---------------|---------------|---------------|---------------|
+| Level 1 (50 pts) | 10% | 85% | 40 years | 10% |
+| Level 2 (70 pts) | 15% | 95% | 45 years | 20% |
+| Level 3 (100 pts) | 25% | 95% | 50 years | 30% + limited recourse |
+
+The financing incentives are significant: a developer at Level 3 can borrow 95% of costs over 50 years, compared to 85% over 40 years at Level 1. This is why the vast majority of projects in the Edmonton data choose Level 3, committing to 25% affordable units in exchange for the program's best terms.
+
+The affordability threshold — 30% of median renter household income — was approximately \$1,500 per month for Edmonton's CMA in 2021, based on a median renter household income of around \$60,000 [@statcan2021census_profile].[^1]
+
+[^1]: The exact current threshold would be set using CMHC's Area Median Household Income figures.
+
+I believe, but could be wrong that MLI Select approval generally come *before* building permits. Developers secure financing commitments first, then pull permits. This means the MLI data we have today is a leading indicator of what's being built.
+
+## Edmonton's housing need
+
+```{r}
+#| label: setup
+#| include: false
+
+library(tidyverse)
+library(readxl)
+library(sf)
+library(gt)
+library(jdawangHelpers)
+library(mountainmathHelpers)
+library(scales)
+```
+
+```{r}
+#| label: load-mli
+#| include: false
+
+mli_raw <- read_excel(
+  "../../../data/AF-2025-00069 Release Package.xlsx",
+  sheet = 1
+) |>
+  rename(
+    year = `First Approval Year`,
+    product_type = `Product Type`,
+    loan_purpose = `Loan Purpose Group`,
+    total_units = `Total Units & Beds`,
+    affordability_level = `Affordability Level`,
+    cma = CMA
+  ) |>
+  mutate(
+    year = as.integer(year),
+    total_units = as.integer(total_units)
+  )
+```
+
+```{r}
+#| label: load-bp
+#| include: false
+
+bp <- read_sf(
+  "../../../data/General Building Permits_20260113/geo_export_204e1c7a-3fac-403d-abe1-be2272f9ce62.shp"
+) |>
+  filter(year < 2026) |>
+  clean_edmonton_bp_columns() |>
+  filter_edmonton_residential() |>
+  add_edmonton_project_type()
+```
+
+Edmonton had `r format(46155, big.mark=",")` households in core housing need as of the 2021 Census, a figure that has only grown as rents have risen since then [@statcan2021core_housing].[^2] The city has been building more housing than almost anywhere else in Canada, but affordability remains a serious challenge: more homes help, but below-market rental units matter too.
+
+[^2]: Core housing need reflects households spending 30%+ of income on shelter or living in inadequate/unsuitable housing and unable to afford alternative shelter.
+
+MLI Select is one of the few tools that generates both at once. By tying favourable mortgage insurance to affordability commitments, it turns market-rate development into a vehicle for mandated-affordable housing and Edmonton's rezoning has made it accessible to a new class of projects.
+
+## MLI Select in Edmonton: the overall picture
+
+Between 2022 and 2025, CMHC approved 977 MLI Select loans in the Edmonton CMA, covering 33,388 units. The majority were for new construction.
+
+```{r}
+#| label: fig-mli-all
+#| fig-cap: "MLI Select approvals in Edmonton CMA, 2022–2025"
+
+mli_summary <- mli_raw |>
+  group_by(year, loan_purpose) |>
+  summarize(n_loans = n(), total_units = sum(total_units), .groups = "drop")
+
+ggplot(mli_summary, aes(x = year, y = n_loans, fill = loan_purpose)) +
+  geom_col(position = "stack") +
+  scale_x_continuous(breaks = 2022:2025) +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "MLI Select loan approvals in Edmonton CMA",
+    subtitle = "New construction has driven growth since 2023",
+    x = NULL,
+    y = "Number of loans",
+    caption = "Jacob Dawang, CMHC data",
+    fill = "Loan purpose"
+  ) +
+  theme_jd(mode = "light") +
+  theme(legend.position = "bottom")
+```
+
+As shown in @fig-mli-all, new construction approvals peaked at 233 loans in 2024, before easing in 2025. This does not mean activity is declining. MLI approval precedes building permits, so 2025 permits largely reflect 2024 MLI approvals.
+
+## The ZBR connection: small infill projects
+
+The real story is in small projects, the 5 to 8 unit rowhomes that ZBR specifically enabled in Edmonton's mature neighbourhoods.
+
+```{r}
+#| label: fig-mli-small
+#| fig-cap: "Small (5–8 unit) New Construction MLI Select approvals in Edmonton CMA, 2022–2025"
+
+mli_small <- mli_raw |>
+  filter(
+    loan_purpose == "New Construction",
+    between(total_units, 5, 8)
+  ) |>
+  group_by(year, affordability_level) |>
+  summarize(n_loans = n(), total_units = sum(total_units), .groups = "drop") |>
+  mutate(affordability_level = fct_rev(affordability_level))
+
+mli_small_total <- mli_small |>
+  group_by(year) |>
+  summarize(n_loans = sum(n_loans), total_units = sum(total_units))
+
+n_mli_2024 <- mli_small_total$n_loans[mli_small_total$year == 2024]
+
+ggplot(mli_small, aes(x = year, y = n_loans, fill = affordability_level)) +
+  geom_col(position = "stack") +
+  geom_vline(
+    xintercept = 2023.5,
+    linetype = "dashed",
+    colour = "grey40",
+    linewidth = 0.6
+  ) +
+  annotate(
+    "text",
+    x = 2023.55,
+    y = Inf,
+    label = "ZBR in force (Jan 2024)",
+    hjust = 0,
+    vjust = 1.5,
+    size = 3,
+    colour = "grey40"
+  ) +
+  scale_x_continuous(breaks = 2022:2025) +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Small infill (5–8 unit) MLI Select approvals",
+    subtitle = "New construction only, Edmonton CMA",
+    x = NULL,
+    y = "Number of loans",
+    caption = "Jacob Dawang, CMHC data",
+    fill = "Affordability level"
+  ) +
+  theme_jd(mode = "light") +
+  theme(legend.position = "bottom")
+```
+
+@fig-mli-small shows the numbers are striking:
+
+- **Pre-ZBR (2022–2023):** 110 small new construction MLI Select loans in total
+- **Post-ZBR (2024–2025):** 283 loans, 2.6 times more in just two years
+
+In 2024 alone, developers secured `r n_mli_2024` small infill MLI loans. This was the year ZBR came into force, opening up RS-zoned lots in mature neighbourhoods to 5–8 unit development. Developers, now confident their projects were permitted as-of-right, lined up federal financing.
+
+Those 2024 MLI approvals fed directly into Edmonton's 2025 building permit year — [the first year more homes were permitted in 5–8 unit rowhomes than single family homes](../zbr-two-year-review/index.qmd) in the city's history.
+
+## How many of Edmonton's new rowhomes use MLI Select?
+
+```{r}
+#| label: bp-ratio
+#| include: false
+
+bp_small_by_year <- bp |>
+  st_drop_geometry() |>
+  filter(project_type == "Fiveplex to Eightplex") |>
+  group_by(year) |>
+  summarize(n_permits = n(), total_units = sum(units_added)) |>
+  filter(year %in% 2022:2025)
+
+mli_small_by_year <- mli_raw |>
+  filter(
+    loan_purpose == "New Construction",
+    between(total_units, 5, 8)
+  ) |>
+  group_by(year) |>
+  summarize(n_mli = n(), mli_units = sum(total_units))
+
+ratio_tbl <- bp_small_by_year |>
+  left_join(mli_small_by_year, by = "year") |>
+  mutate(
+    # Lag-adjusted: compare MLI approvals from prior year to current permits
+    # since MLI approval precedes permits
+    mli_lagged = lag(n_mli),
+    ratio_lagged = mli_lagged / n_permits
+  )
+
+n_permits_2025 <- bp_small_by_year$n_permits[bp_small_by_year$year == 2025]
+mli_ratio_pct <- scales::percent(n_mli_2024 / n_permits_2025, accuracy = 1)
+```
+
+We can cross-reference the MLI Select approvals with Edmonton building permit data to estimate the share of small rowhome projects using MLI financing.
+
+Because MLI approval comes before building permits, we compare 2024 MLI approvals (`r n_mli_2024` loans) against 2025 building permits for the same project type. In 2025, Edmonton issued building permits for approximately `r n_permits_2025` new 5–8 unit projects. This implies roughly `r mli_ratio_pct` of new small rowhome projects were backed by MLI Select financing — comparable to Mark Locki's finding of 39% for Calgary, as shown in @fig-mli-ratio.
+
+```{r}
+#| label: fig-mli-ratio
+#| fig-cap: "Estimated share of 5–8 unit new construction permits backed by MLI Select, Edmonton (lag-adjusted)"
+
+ratio_tbl |>
+  filter(!is.na(ratio_lagged)) |>
+  ggplot(aes(x = year, y = ratio_lagged)) +
+  geom_line(colour = viridis::magma(1, begin = 0.7)) +
+  geom_point(colour = viridis::magma(1, begin = 0.7), size = 3) +
+  geom_vline(
+    xintercept = 2023.5,
+    linetype = "dashed",
+    colour = "grey40",
+    linewidth = 0.6
+  ) +
+  annotate(
+    "text",
+    x = 2023.55,
+    y = Inf,
+    label = "ZBR in force",
+    hjust = 0,
+    vjust = 1.5,
+    size = 3,
+    colour = "grey40"
+  ) +
+  scale_x_continuous(breaks = 2022:2025) +
+  scale_y_continuous(labels = percent, limits = c(0, NA)) +
+  labs(
+    title = "MLI Select share of small rowhome permits",
+    subtitle = "Prior-year MLI approvals as a share of 5–8 unit building permits",
+    x = NULL,
+    y = "MLI Select share",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+This is necessarily an approximation: the MLI data covers the Edmonton CMA (including surrounding municipalities) while building permits cover Edmonton city only, and the lag between MLI approval and permit issuance varies by project.
+
+## Estimating affordable units created
+
+The most important implication of MLI Select's dominance among small infill projects is the mandated affordable units it generates. Using the program's affordability requirements:
+
+```{r}
+#| label: affordable-units-calc
+
+affordability_rates <- tibble(
+  affordability_level = c("Level 1", "Level 2", "Level 3"),
+  affordable_fraction = c(0.10, 0.15, 0.25)
+)
+
+mli_small_affordable <- mli_raw |>
+  filter(
+    loan_purpose == "New Construction",
+    between(total_units, 5, 8)
+  ) |>
+  left_join(affordability_rates, by = "affordability_level") |>
+  mutate(affordable_units = total_units * affordable_fraction) |>
+  group_by(year) |>
+  summarize(
+    n_loans = n(),
+    total_units = sum(total_units),
+    affordable_units = sum(affordable_units),
+    .groups = "drop"
+  ) |>
+  mutate(
+    era = if_else(year < 2024, "Pre-ZBR (2022–23)", "ZBR era (2024–25)")
+  )
+
+total_affordable <- sum(mli_small_affordable$affordable_units)
+zbr_affordable <- mli_small_affordable |>
+  filter(era == "ZBR era (2024–25)") |>
+  pull(affordable_units) |>
+  sum()
+```
+
+```{r}
+#| label: fig-affordable-units
+#| fig-cap: "Estimated mandated-affordable units from small infill MLI Select projects, Edmonton CMA"
+
+mli_small_affordable |>
+  select(year, total_units, affordable_units) |>
+  pivot_longer(
+    c(total_units, affordable_units),
+    names_to = "type",
+    values_to = "units"
+  ) |>
+  mutate(
+    type = factor(
+      type,
+      levels = c("total_units", "affordable_units"),
+      labels = c("Total units", "Mandated-affordable units")
+    )
+  ) |>
+  ggplot(aes(x = year, y = units, fill = type)) +
+  geom_col(position = "identity") +
+  geom_vline(
+    xintercept = 2023.5,
+    linetype = "dashed",
+    colour = "grey40",
+    linewidth = 0.6
+  ) +
+  annotate(
+    "text",
+    x = 2023.55,
+    y = Inf,
+    label = "ZBR in force",
+    hjust = 0,
+    vjust = 1.5,
+    size = 3,
+    colour = "grey40"
+  ) +
+  scale_x_continuous(breaks = 2022:2025) +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Units from small infill MLI Select projects",
+    subtitle = "Mandated-affordable units must be rented at ≤30% of median renter income",
+    x = NULL,
+    y = "Units",
+    fill = NULL,
+    caption = "Jacob Dawang, CMHC, City of Edmonton Open Data"
+  ) +
+  theme_jd(mode = "light") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#| label: tbl-affordable
+#| tbl-cap: "Estimated affordable units from small infill MLI Select"
+
+mli_small_affordable |>
+  select(year, n_loans, total_units, affordable_units) |>
+  mutate(
+    affordable_units = round(affordable_units),
+    affordable_pct = affordable_units / total_units
+  ) |>
+  gt(rowname_col = "year") |>
+  tab_stubhead("Year") |>
+  cols_label(
+    n_loans = "MLI Select loans",
+    total_units = "Total units",
+    affordable_units = "Est. affordable units",
+    affordable_pct = "Affordable share"
+  ) |>
+  fmt_percent(affordable_pct, decimals = 0) |>
+  fmt_integer(c(total_units, affordable_units)) |>
+  grand_summary_rows(
+    columns = c(n_loans, total_units, affordable_units),
+    fns = list(Total ~ sum(.)),
+    fmt = ~ fmt_integer(.)
+  ) |>
+  tab_style(
+    style = cell_fill(color = "#FFF3E0"),
+    locations = cells_body(rows = year >= 2024)
+  ) |>
+  tab_header(
+    "Estimated affordable units from small infill MLI Select, by year"
+  ) |>
+  finalize_gt(source = "Jacob Dawang, CMHC, City of Edmonton Open Data")
+```
+
+```{r}
+#| label: totals
+#| include: false
+
+total_affordable_all <- mli_raw |>
+  left_join(affordability_rates, by = "affordability_level") |>
+  mutate(a = total_units * affordable_fraction) |>
+  filter(loan_purpose == "New Construction") |>
+  summarize(total = sum(a)) |>
+  _$total |>
+  round()
+```
+
+Across all four years, small infill MLI Select projects generated an estimated `r round(total_affordable)` mandated-affordable units in the Edmonton CMA, with approximately `r round(zbr_affordable)` coming in the ZBR era (2024–2025), a period that also saw 2.6 times as many projects as the two years prior (see @fig-affordable-units and @tbl-affordable).
+
+These are units where rents are contractually capped at roughly \$1,500 per month or below.
+
+## Conclusion
+
+Small infill is only one part of Edmonton's MLI Select story, but it is uniquely enabled by zoning. Large apartment towers were already permissible before ZBR. The 5–8 unit rowhomes could not exist in mature neighbourhoods until January 2024. Every one of the 283 small new construction MLI Select loans approved since ZBR represents a project that would have been illegal two years earlier.
+
+Edmonton's Zoning Bylaw Renewal is delivering on housing affordability in a way that rarely gets discussed. By legalizing small infill development in mature neighbourhoods, the ZBR didn't just add housing supply, it unlocked CMHC's MLI Select program for a class of projects that previously couldn't exist. Those projects come with mandated affordable rents attached.
+
+The pipeline continues to grow. The 104 small infill MLI approvals from 2025 represent projects currently under construction or about to break ground — adding to the stock of affordable units in Edmonton's established neighbourhoods.
+
+This is what good housing policy looks like: a municipal zoning reform enabling federal affordable housing finance, delivering affordable homes in mature neighbourhoods with established street grids, amenities, and transit connections where demand is high. The question now is whether we can keep the momentum going.
