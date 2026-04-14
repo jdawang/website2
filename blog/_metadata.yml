@@ -1,7 +1,3 @@
-# Freeze computed outputs
-freeze: auto
-
-
 # Enable banner style title blocks
 title-block-banner: true
 
@@ -18,7 +14,6 @@ execute:
   message: false
   warning: false
   cache: true
-  freeze: true
 
 author:
  - name: Jacob Dawang
