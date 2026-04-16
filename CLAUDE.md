@@ -53,6 +53,58 @@ link-external-icon: false
 
 Posts use R code chunks with knitr. Common libraries: `tidyverse`, `sf`, `gt`, `ggplot2`, `cancensus`, `mountainmathHelpers`. Data paths typically reference `../../../data` relative to the post via `here()`.
 
+In the first R chunk, along with imports, always load the following options like the following. These set important API keys and cache paths for the cancensus and jdawangHelpers packages:
+
+```r
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path = Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key = Sys.getenv("NEXTZEN_API_KEY")
+)
+```
+
+## jdawangHelpers package
+
+The `jdawangHelpers` package ([github.com/jdawang/jdawangHelpers](https://github.com/jdawang/jdawangHelpers)) contains reusable helpers for this blog. Always install it from GitHub, never from a local path:
+
+```r
+remotes::install_github("jdawang/jdawangHelpers")
+```
+
+Use its functions instead of writing equivalent code inline. Key exports:
+
+**Themes**
+- `theme_jd(mode)` — ggplot2 theme with dark/light mode, viridis magma palette, Source Sans Pro font
+- `theme_map(mode)` — map-specific theme (no axes/grids, transparent panel)
+
+**Plot layers**
+- `layers_map_base(roads_type, mode)` — water + roads base layers for maps (wraps `mountainmathHelpers`)
+- `layers_transit_ecdf(colour_var, x_max)` — ECDF step-plot layers for cumulative units by LRT distance
+
+**GT table helpers**
+- `opt_stylize_jd(data, mode)` — style a GT table to match `theme_jd()`
+- `finalize_gt(gt_tbl, source, interactive)` — add source note, sub missing values, optional interactivity
+
+**Building permits**
+- `clean_edmonton_bp_columns(bp, crs)` — rename/clean columns from the Edmonton Open Data shapefile
+- `filter_edmonton_residential(bp)` — filter to residential building types
+- `add_edmonton_project_type(bp)` — classify permits into project type categories
+- `add_edmonton_suite_info(bp)` — extract secondary suite counts and backyard home flags
+
+**Neighbourhood classification**
+- `add_edmonton_neighbourhood_type(bp)` — classify permits as Downtown/Mature/Between mature and Henday/Outside Henday (uses bundled `mature_neighbourhood` and `henday` spatial datasets)
+
+**Transit**
+- `load_edmonton_transit_stops(gtfs_path, ...)` — load Edmonton LRT stops from a GTFS zip
+- `add_transit_distance(data, transit_stops)` — add `distance_from_lrt` column (km)
+- `make_transit_buffers(transit_stops, radii_km)` — concentric buffer rings around stops
+- `add_ecdf_by_distance(data, group_var, weight_var)` — compute weighted ECDF by transit distance
+
+**Constants**
+- `EDMONTON_RESIDENTIAL_BUILDING_TYPES` — character vector of residential building type strings
+- `CAPTION_COE`, `CAPTION_COE_SC`, `CAPTION_TORONTO` — standard caption strings for plots/tables
+
 ## R package management
 
 Posts have their own `renv.lock` for reproducibility. To restore packages for a specific post:
