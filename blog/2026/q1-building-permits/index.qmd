@@ -429,6 +429,7 @@ The rowhome is the new attainable home for Edmontonian families who want to live
 #| label: fig-annualized-nbhd
 #| fig-cap: "Homes permitted by neighbourhood type, 2009–2025 (full year) and 2026 (projected from Q1)"
 #| fig-subcap: ["Line plot", "Area plot"]
+#| classes: preview-image
 annual_nbhd <- bp |>
   st_drop_geometry() |>
   filter(year < 2026, !is.na(neighbourhood_type)) |>
