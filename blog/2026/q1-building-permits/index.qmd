@@ -1,0 +1,866 @@
+---
+title: "2026 Q1 Edmonton building permit report"
+date: "2026-04-16"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning]
+description: "A first look at 2026 building permits through Q1, tracking whether Edmonton will continue the record-breaking momentum of 2025."
+link-external-newwindow: true
+link-external-icon: false
+execute:
+  cache: false
+---
+
+2025 was a [banner year for Edmonton housing](../zbr-two-year-review/index.qmd). We permitted over 17,500 homes, a record, found the missing middle, and built closer to transit than ever before. The question now is whether 2026 will continue that momentum, or whether 2025 was a one-time peak.
+
+With Q1 2026 data in hand, we can take a first look. In the rest of this post, I compare Q1 2026 permits year-over-year against prior Q1s, project what a full 2026 might look like if this pace holds, look at which neighbourhoods are seeing the most RS Zone infill, and check whether Edmonton is continuing to build close to transit.
+
+## Key facts
+
+```{r}
+#| label: key-facts-setup
+#| include: false
+library(tidyverse)
+library(sf)
+library(gt)
+library(mountainmathHelpers)
+library(tidytransit)
+library(jdawangHelpers)
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path = Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key = Sys.getenv("NEXTZEN_API_KEY")
+)
+
+bp_raw <- read_sf("../../../data/building-permits-2026-04-14/")
+crs <- lambert_conformal_conic_at(bp_raw)
+
+bp <- bp_raw |>
+  clean_edmonton_bp_columns(crs = crs) |>
+  filter(year < 2026 | (year == 2026 & month_number <= 3)) |>
+  filter_edmonton_residential() |>
+  filter(units_added >= 1, work_type != "(04) Excavation") |>
+  add_edmonton_project_type() |>
+  add_edmonton_suite_info() |>
+  add_edmonton_neighbourhood_type()
+
+# Q1 data for all years (for YoY comparison and transit)
+bp_q1 <- bp |> filter(month_number <= 3)
+
+# Historical Q1 vs full-year ratios (for multiplier)
+q1_ratios <- bp |>
+  st_drop_geometry() |>
+  filter(year < 2026) |>
+  group_by(year) |>
+  summarize(
+    full_year = sum(units_added),
+    q1 = sum(units_added[month_number <= 3]),
+    .groups = "drop"
+  ) |>
+  mutate(ratio = full_year / q1)
+
+q1_multiplier <- round(median(q1_ratios$ratio), 1)
+
+# Q1 2026 totals
+q1_2026_total <- bp_q1 |>
+  st_drop_geometry() |>
+  filter(year == 2026) |>
+  summarize(total = sum(units_added)) |>
+  pull(total)
+
+q1_2025_total <- bp_q1 |>
+  st_drop_geometry() |>
+  filter(year == 2025) |>
+  summarize(total = sum(units_added)) |>
+  pull(total)
+
+yoy_pct <- round((q1_2026_total / q1_2025_total - 1) * 100, 1)
+annualized_2026 <- round(q1_2026_total * q1_multiplier)
+
+# Transit proximity for Q1 2026
+future_stops <- read_sf("../../../data/future_lrt_stops.geojson") |>
+  filter(
+    !(stop_name %in%
+      c(
+        "Castle Downs Station",
+        "145 Ave Station",
+        "137 Ave Station",
+        "132 Ave Station"
+      ))
+  )
+
+transit_stops <- load_edmonton_transit_stops(
+  gtfs_path = "../../../data/ca-alberta-edmonton-transit-system-gtfs-714.zip",
+  service_date = as.Date("2023-11-09"),
+  future_stops = future_stops,
+  crs = crs
+)
+
+pct_800m_q1_2026 <- bp_q1 |>
+  filter(year == 2026, !st_is_empty(geometry)) |>
+  add_transit_distance(transit_stops) |>
+  st_drop_geometry() |>
+  summarize(
+    pct = sum(units_added[distance_from_lrt <= 0.8]) / sum(units_added)
+  ) |>
+  pull(pct)
+
+pct_800m_2025 <- bp |>
+  filter(year == 2025, !st_is_empty(geometry)) |>
+  add_transit_distance(transit_stops) |>
+  st_drop_geometry() |>
+  summarize(
+    pct = sum(units_added[distance_from_lrt <= 0.8]) / sum(units_added)
+  ) |>
+  pull(pct)
+
+# Top project type in Q1 2026
+top_project_type <- bp_q1 |>
+  st_drop_geometry() |>
+  filter(year == 2026) |>
+  group_by(project_type) |>
+  summarize(total = sum(units_added), .groups = "drop") |>
+  slice_max(total, n = 1) |>
+  pull(project_type)
+```
+
+- Edmonton issued building permits for **`r scales::comma(q1_2026_total)`** homes in Q1 2026. Annualized, that projects to roughly **`r scales::comma(annualized_2026)`** homes for the full year.
+
+- Q1 2026 is **`r abs(yoy_pct)`%`r if(yoy_pct >= 0) " higher" else " lower"`** than Q1 2025, when `r scales::comma(q1_2025_total)` homes were permitted.
+
+- **`r top_project_type`** projects led all categories by homes added in Q1 2026.
+
+- **`r scales::percent(pct_800m_q1_2026, accuracy=1)`** of homes were permitted within 800m of an existing or under-construction LRT stop, compared to `r scales::percent(pct_800m_2025, accuracy=1)` in 2025 (full year).
+
+## Data
+
+```{r}
+#| label: data-load
+# bp, bp_q1, transit_stops are already loaded in key-facts-setup chunk above
+
+# Assessment data for neighbourhood tables
+assessment_rs <- read_sf(
+  "../../../data/Property Information (Current Calendar Year)_20260113/"
+) |>
+  st_drop_geometry() |>
+  rename(
+    house_number = house_numb,
+    street_name = street_nam,
+    neighbourhood = neighbou_2
+  ) |>
+  filter(zoning == "RS", !is.na(house_number)) |>
+  distinct(house_number, street_name, .keep_all = TRUE)
+
+# Neighbourhood → neighbourhood_type lookup from bp
+nbhd_type_lookup <- bp |>
+  st_drop_geometry() |>
+  distinct(neighbourhood, neighbourhood_type) |>
+  filter(!is.na(neighbourhood_type))
+
+assessment_rs <- assessment_rs |>
+  left_join(nbhd_type_lookup, by = "neighbourhood")
+
+# Population and ward data
+wards <- read_csv(
+  "../../../data/Neighbourhoods_and_Wards_20250703.csv",
+  show_col_types = FALSE
+) |>
+  select(neighbourhood = `Neighbourhood Name`, Ward) |>
+  mutate(neighbourhood = str_to_upper(neighbourhood))
+
+population_1971 <- read_csv(
+  "../../../data/population_1971.csv",
+  show_col_types = FALSE
+) |>
+  select(neighbourhood = Neighbourhood, n_1971 = `Total - Age`)
+
+population_2021 <- read_csv(
+  "../../../data/population_2021.csv",
+  show_col_types = FALSE
+) |>
+  distinct() |>
+  rename(neighbourhood = NEIGHBOURHOOD, n_2021 = `2021`)
+
+population_change <- population_2021 |>
+  full_join(population_1971, by = "neighbourhood") |>
+  left_join(wards, by = "neighbourhood") |>
+  replace_na(list(n_2021 = 0, n_1971 = 0)) |>
+  mutate(pct_change = n_2021 / n_1971 - 1)
+```
+
+Edmonton's [general building permit data](https://data.edmonton.ca/Urban-Planning-Economy/General-Building-Permits/24uj-dj8v/about_data) tracks building permits since 2009, with columns for building type, work type, location, units added, and more. The 2026 data was downloaded on April 14, 2026, and filtered to Q1 (January through March) to exclude incomplete April data.
+
+Edmonton's [property assessment data](https://data.edmonton.ca/City-Administration/Property-Assessment-Data-Current-Calendar-Year-/q7d6-ambg/about_data) provides one row per property with zoning and neighbourhood information, used to calculate how many RS-zoned properties exist per neighbourhood.
+
+For background on the RS Zone and ZBR, see the [two-year review post](../zbr-two-year-review/index.qmd).
+
+I want to project 2026 total numbers, but we only have Q1 data so far. 
+Similar to my [previous post in mid-2025](../../2025/real-rs-story/index.qmd), I estimate an annualization multiplier from historical data. For each year from 2009 to 2025, I calculate the ratio of full-year units to Q1 units, and use the median as the multiplier.
+Any figure that shows 2026 projected numbers uses this simple adjustment.
+
+```{r}
+#| label: fig-q1-multiplier
+#| fig-cap: "Historical ratio of full-year to Q1 residential building permit units"
+ggplot(q1_ratios, aes(x = year, y = ratio)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  geom_hline(
+    yintercept = q1_multiplier,
+    linetype = "dashed",
+    colour = "grey60"
+  ) +
+  annotate(
+    "text",
+    x = 2015,
+    y = q1_multiplier + 0.15,
+    label = paste0("Median: ", q1_multiplier),
+    size = 3.5
+  ) +
+  labs(
+    title = "Ratio of full-year to Q1 residential building permit units",
+    subtitle = "2009-2025",
+    x = "Year",
+    y = "Full-year / Q1 ratio",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+The median Q1 multiplier is **`r q1_multiplier`×**, as shown in @fig-q1-multiplier, meaning a full year typically produces `r q1_multiplier` times the homes permitted in Q1 alone. All 2026 projections in this post use this multiplier.
+
+## Year-over-year Q1 comparison
+
+The most direct way to compare Q1 2026 to prior years is to look at Q1 data across all years, stripping out seasonality entirely. @fig-q1-yoy-units shows units added in Q1 for each year since 2009, broken down by project type.
+2026 is off to a strong start, with a steady number of homes permitted in Q1.
+Similar to 2025, we continue to see steady growth of the 5-8 unit category, which is firmly established as an important part of Edmonton's housing supply.
+
+```{r}
+#| label: fig-q1-yoy-units
+#| fig-cap: "Total homes permitted in Q1 by project type, 2009–2026"
+#| fig-subcap: ["Line plot", "Area plot"]
+q1_by_type <- bp_q1 |>
+  st_drop_geometry() |>
+  group_by(year, project_type, .drop = FALSE) |>
+  summarize(total = sum(units_added), num_projects = n(), .groups = "drop")
+
+ggplot(q1_by_type, aes(x = year, y = total, colour = project_type)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Homes permitted by project type",
+    subtitle = "Q1 building permits, 2009–2026",
+    colour = "Project type",
+    x = "Year",
+    y = "Homes permitted",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+
+ggplot(q1_by_type, aes(x = year, y = total, fill = project_type)) +
+  geom_area() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Homes permitted by project type",
+    subtitle = "Q1 building permits, 2009–2026",
+    fill = "Project type",
+    x = "Year",
+    y = "Homes permitted",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+@fig-q1-yoy-permits shows the same Q1 data as raw permit counts rather than units, a complementary view for understanding how many discrete projects are driving each category.
+
+```{r}
+#| label: fig-q1-yoy-permits
+#| fig-cap: "Number of building permits issued in Q1 by project type, 2009–2026"
+#| fig-subcap: ["Line plot", "Area plot"]
+ggplot(q1_by_type, aes(x = year, y = num_projects, colour = project_type)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Building permits issued by project type",
+    subtitle = "Q1 building permits, 2009–2026",
+    colour = "Project type",
+    x = "Year",
+    y = "Number of permits",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+
+ggplot(q1_by_type, aes(x = year, y = num_projects, fill = project_type)) +
+  geom_area() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Building permits issued by project type",
+    subtitle = "Q1 building permits, 2009–2026",
+    fill = "Project type",
+    x = "Year",
+    y = "Number of permits",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+Looking at the number of homes by neighbourhood type, @fig-q1-yoy-nbhd shows continued historical levels of supply in mature neighbourhoods, driven by the 5-8 unit rowhome.
+Outside the Henday, building permits have gone down in this Q1, though that could be due to the volatility of the large apartment category.
+
+```{r}
+#| label: fig-q1-yoy-nbhd
+#| fig-cap: "Total homes permitted in Q1 by neighbourhood type, 2009–2026"
+#| fig-subcap: ["Line plot", "Area plot"]
+q1_by_nbhd_type <- bp_q1 |>
+  st_drop_geometry() |>
+  filter(!is.na(neighbourhood_type)) |>
+  group_by(year, neighbourhood_type, project_type, .drop = FALSE) |>
+  summarize(total = sum(units_added), .groups = "drop")
+
+ggplot(q1_by_nbhd_type, aes(x = year, y = total, colour = project_type)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  facet_wrap(vars(neighbourhood_type)) +
+  labs(
+    title = "Homes permitted by neighbourhood type and project type",
+    subtitle = "Q1 building permits, 2009–2026",
+    colour = "Project type",
+    x = "Year",
+    y = "Homes permitted",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+
+ggplot(q1_by_nbhd_type, aes(x = year, y = total, fill = project_type)) +
+  geom_area() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  facet_wrap(vars(neighbourhood_type)) +
+  labs(
+    title = "Homes permitted by neighbourhood type and project type",
+    subtitle = "Q1 building permits, 2009–2026",
+    fill = "Project type",
+    x = "Year",
+    y = "Homes permitted",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+## Projecting 2026 from Q1 data
+
+If we take Q1 as an early signal for the full year, @fig-annualized-units shows the historical full-year units added by project type, with 2026 projected from Q1 using the `r q1_multiplier`× adjustment.
+
+We can see a projected dip from the high level of 2025, though 2026 would still be a strong year by historical standards.
+We'll have to wait and see, a handful of large apartment projects could significantly move the needle on the total.
+
+```{r}
+#| label: fig-annualized-units
+#| fig-cap: "Total homes permitted by project type, 2009–2025 (full year) and 2026 (projected from Q1)"
+#| fig-subcap: ["Line plot", "Area plot"]
+annual_by_type <- bp |>
+  st_drop_geometry() |>
+  filter(year < 2026) |>
+  group_by(year, project_type, .drop = FALSE) |>
+  summarize(total = sum(units_added), num_projects = n(), .groups = "drop")
+
+projected_2026 <- bp_q1 |>
+  st_drop_geometry() |>
+  filter(year == 2026) |>
+  group_by(year, project_type, .drop = FALSE) |>
+  summarize(
+    total = sum(units_added) * q1_multiplier,
+    num_projects = n() * q1_multiplier,
+    .groups = "drop"
+  ) |>
+  mutate(projected = TRUE)
+
+plot_data <- bind_rows(
+  mutate(annual_by_type, projected = FALSE),
+  projected_2026
+)
+
+ggplot(plot_data, aes(x = year, y = total, colour = project_type)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Homes permitted by project type",
+    subtitle = paste0(
+      "Full year 2009–2025; 2026 projected from Q1 (×",
+      q1_multiplier,
+      ")"
+    ),
+    colour = "Project type",
+    x = "Year",
+    y = "Homes permitted",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+
+ggplot(plot_data, aes(x = year, y = total, fill = project_type)) +
+  geom_area() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Homes permitted by project type",
+    subtitle = paste0(
+      "Full year 2009–2025; 2026 projected from Q1 (×",
+      q1_multiplier,
+      ")"
+    ),
+    fill = "Project type",
+    x = "Year",
+    y = "Homes permitted",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+@fig-annualized-nbhd breaks the same projection down by neighbourhood type.
+We can see that we are projected for another record year in mature neighbourhoods, once again driven by the 5-8 unit rowhome category.
+2025 was not a blip: when given the option, a lot of people want to live more centrally, even if it means living in a rowhome instead of a detached house.
+Why wouldn't they? They are close to transit, with more mature trees, more businesses within walking distance, and better access to jobs. Many also sit in neighbourhoods with more amenities and room in schools.
+Moreover, according to a [report to Edmonton City Council on February 17](https://pub-edmonton.escribemeetings.com/Meeting.aspx?Id=213d47bf-00f0-44be-9efe-3598ae1b6ba4&Agenda=Agenda&lang=English&Item=45&Tab=attachments), 50% of units in rowhomes are over 1,000 square feet, making them a great option for families.
+The myth that everyone wants a detached house with a yard in the suburbs should be dead at this point.
+The rowhome is the new attainable home for Edmontonian families who want to live in mature neighbourhoods, and the data shows that they are choosing it in large numbers when given the option.
+
+```{r}
+#| label: fig-annualized-nbhd
+#| fig-cap: "Homes permitted by neighbourhood type, 2009–2025 (full year) and 2026 (projected from Q1)"
+#| fig-subcap: ["Line plot", "Area plot"]
+annual_nbhd <- bp |>
+  st_drop_geometry() |>
+  filter(year < 2026, !is.na(neighbourhood_type)) |>
+  group_by(year, neighbourhood_type, project_type, .drop = FALSE) |>
+  summarize(total = sum(units_added), .groups = "drop") |>
+  mutate(projected = FALSE)
+
+projected_2026_nbhd <- bp_q1 |>
+  st_drop_geometry() |>
+  filter(year == 2026, !is.na(neighbourhood_type)) |>
+  group_by(year, neighbourhood_type, project_type, .drop = FALSE) |>
+  summarize(total = sum(units_added) * q1_multiplier, .groups = "drop") |>
+  mutate(projected = TRUE)
+
+plot_nbhd <- bind_rows(annual_nbhd, projected_2026_nbhd)
+
+ggplot(plot_nbhd, aes(x = year, y = total, colour = project_type)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  facet_wrap(vars(neighbourhood_type)) +
+  labs(
+    title = "Homes permitted by neighbourhood type and project type",
+    subtitle = paste0(
+      "Full year 2009–2025; 2026 projected from Q1 (×",
+      q1_multiplier,
+      ")"
+    ),
+    colour = "Project type",
+    x = "Year",
+    y = "Homes permitted",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+
+ggplot(plot_nbhd, aes(x = year, y = total, fill = project_type)) +
+  geom_area() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  facet_wrap(vars(neighbourhood_type)) +
+  labs(
+    title = "Homes permitted by neighbourhood type and project type",
+    subtitle = paste0(
+      "Full year 2009–2025; 2026 projected from Q1 (×",
+      q1_multiplier,
+      ")"
+    ),
+    fill = "Project type",
+    x = "Year",
+    y = "Homes permitted",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+## Top neighbourhoods for RS infill
+
+Where is the infill actually happening? And how does the level of activity compare to the total number of properties in each neighbourhood?
+
+@tbl-rs-nbhd-type shows the Q1 2026 5–8 unit RS Zone permit activity by neighbourhood type, compared to the total number of RS-zoned properties. Even in Q1, the share of properties being redeveloped is tiny.
+
+```{r}
+#| label: tbl-rs-nbhd-type
+#| tbl-cap: "RS Zone 5–8 unit permits vs total properties by neighbourhood type, Q1 2026"
+n_plexes_q1_2026 <- bp_q1 |>
+  st_drop_geometry() |>
+  filter(
+    year == 2026,
+    zoning == "RS",
+    between(units_added, 5, 8)
+  ) |>
+  group_by(neighbourhood_type) |>
+  summarize(
+    n_permits = n(),
+    total_units = sum(units_added),
+    .groups = "drop"
+  ) |>
+  mutate(
+    n_permits_projected = n_permits * q1_multiplier,
+    total_units_projected = total_units * q1_multiplier
+  )
+
+n_assessed_rs_by_type <- assessment_rs |>
+  filter(!is.na(neighbourhood_type)) |>
+  group_by(neighbourhood_type) |>
+  summarize(n_properties = n(), .groups = "drop")
+
+
+n_assessed_rs_by_type |>
+  left_join(n_plexes_q1_2026, by = "neighbourhood_type") |>
+  replace_na(list(
+    n_permits = 0,
+    total_units = 0,
+    n_permits_projected = 0,
+    total_units_projected = 0
+  )) |>
+  mutate(
+    pct = n_permits / n_properties,
+    pct_projected = n_permits_projected / n_properties
+  ) |>
+  gt() |>
+  cols_move(n_properties, after = n_permits) |>
+  cols_move(pct, after = n_properties) |>
+  cols_move(pct_projected, after = n_permits_projected) |>
+  cols_align("left", columns = neighbourhood_type) |>
+  fmt_percent(columns = c(pct, pct_projected), decimals = 2) |>
+  fmt_integer(
+    columns = c(
+      n_permits,
+      n_properties,
+      total_units,
+      n_permits_projected,
+      total_units_projected,
+    )
+  ) |>
+  cols_label(
+    neighbourhood_type = "Neighbourhood type",
+    n_properties = "RS-zoned properties",
+    n_permits = "Permits",
+    total_units = "Homes added",
+    pct = "% redeveloped",
+    n_permits_projected = "Permits",
+    total_units_projected = "Homes added",
+    pct_projected = "% redeveloped",
+  ) |>
+  tab_spanner(label = "Q1 2026", columns = c(n_permits, total_units, pct)) |>
+  tab_spanner(
+    label = paste0("Projected 2026 (Q1 ×", q1_multiplier, ")"),
+    columns = c(n_permits_projected, total_units_projected, pct_projected)
+  ) |>
+  tab_header(
+    title = "RS Zone intensity by neighbourhood type",
+    subtitle = "Q1 2026, and projected 2026"
+  ) |>
+  finalize_gt() |>
+  opt_stylize_jd()
+```
+
+@tbl-top-neighbourhoods shows the top neighbourhoods by Q1 2026 5–8 unit RS permit volume. These are the neighbourhoods where ZBR's effects are most visible right now. But even in these neighbourhoods, the proportion of properties being redeveloped is small. This is incremental change, not wholesale transformation, which is exactly what ZBR was designed to enable.
+
+```{r}
+#| label: tbl-top-neighbourhoods
+#| tbl-cap: "Top neighbourhoods by Q1 2026 5–8 unit RS permits"
+#| column: page
+n_rs_by_nbhd <- assessment_rs |>
+  group_by(neighbourhood) |>
+  summarize(n_properties = n(), .groups = "drop")
+
+q1_2026_plexes_by_nbhd <- bp_q1 |>
+  st_drop_geometry() |>
+  filter(
+    year == 2026,
+    zoning == "RS",
+    between(units_added, 5, 8)
+  ) |>
+  group_by(neighbourhood) |>
+  summarize(n_permits = n(), units_added = sum(units_added), .groups = "drop")
+
+q1_2026_plexes_by_nbhd |>
+  left_join(n_rs_by_nbhd, by = "neighbourhood") |>
+  left_join(population_change, by = "neighbourhood") |>
+  mutate(
+    neighbourhood = str_to_title(neighbourhood),
+    pct_redevelop = n_permits / n_properties
+  ) |>
+  slice_max(n_permits, n = 5) |>
+  arrange(desc(n_permits)) |>
+  select(-Ward) |>
+  gt() |>
+  cols_move(n_properties, after = n_permits) |>
+  cols_move(pct_redevelop, after = n_properties) |>
+  cols_move(units_added, after = pct_redevelop) |>
+  cols_label(
+    neighbourhood = "Neighbourhood",
+    n_permits = "Permits",
+    units_added = "Homes added",
+    n_properties = "RS properties",
+    pct_redevelop = "% redeveloped",
+    n_2021 = "Population 2021",
+    n_1971 = "Population 1971",
+    pct_change = "Pop. change"
+  ) |>
+  fmt_integer(
+    columns = c(n_permits, units_added, n_properties, n_2021, n_1971)
+  ) |>
+  fmt_percent(columns = c(pct_redevelop, pct_change), decimals = 1) |>
+  tab_header(
+    title = "Top neighbourhoods by Q1 2026 5–8 unit RS permits",
+    subtitle = "Q1 2026 building permits"
+  ) |>
+  finalize_gt() |>
+  opt_stylize_jd()
+```
+
+For comparison, @tbl-selected-neighbourhoods shows the same statistics for a hand-picked set of neighbourhoods that have been prominent in debates about RS Zone infill.
+If one permit for a 5-8 unit rowhome in Q1 would "destroy" the character of neighbourhoods like Crestwood, one would wonder how fragile the character was to begin with.
+
+```{r}
+#| label: tbl-selected-neighbourhoods
+#| tbl-cap: "Selected neighbourhood 5–8 unit RS profiles, Q1 2026"
+#| column: page
+selected_nbhds <- c(
+  "GLENWOOD",
+  "GROVENOR",
+  "BRITANNIA YOUNGSTOWN",
+  "WESTMOUNT",
+  "MCKERNAN",
+  "BELGRAVIA",
+  "CRESTWOOD",
+  "PARKVIEW"
+)
+
+q1_2026_plexes_by_nbhd |>
+  right_join(
+    tibble(neighbourhood = selected_nbhds),
+    by = "neighbourhood"
+  ) |>
+  replace_na(list(n_permits = 0, units_added = 0)) |>
+  left_join(n_rs_by_nbhd, by = "neighbourhood") |>
+  left_join(population_change, by = "neighbourhood") |>
+  mutate(
+    neighbourhood = str_to_title(neighbourhood),
+    pct_redevelop = n_permits / n_properties
+  ) |>
+  select(-Ward) |>
+  arrange(neighbourhood) |>
+  gt() |>
+  cols_move(n_properties, after = n_permits) |>
+  cols_move(pct_redevelop, after = n_properties) |>
+  cols_move(units_added, after = pct_redevelop) |>
+  cols_label(
+    neighbourhood = "Neighbourhood",
+    n_permits = "Permits",
+    units_added = "Homes added",
+    n_properties = "RS properties",
+    pct_redevelop = "% redeveloped",
+    n_2021 = "Population 2021",
+    n_1971 = "Population 1971",
+    pct_change = "Pop. change"
+  ) |>
+  fmt_integer(
+    columns = c(n_permits, units_added, n_properties, n_2021, n_1971)
+  ) |>
+  fmt_percent(columns = c(pct_redevelop, pct_change), decimals = 1) |>
+  tab_header(
+    title = "Selected neighbourhood 5–8 unit RS profiles",
+    subtitle = "Q1 2026 building permits"
+  ) |>
+  finalize_gt() |>
+  opt_stylize_jd()
+```
+
+@tbl-cumulative-neighbourhoods is an interactive table with cumulative 2024 + 2025 + Q1 2026 activity for all neighbourhoods. You can search for your neighbourhood, or sort by any column.
+
+```{r}
+#| label: tbl-cumulative-neighbourhoods
+#| tbl-cap: "Cumulative RS infill by neighbourhood, 2024–Q1 2026 (interactive)"
+#| column: page
+cumulative_plexes_by_nbhd <- bp |>
+  st_drop_geometry() |>
+  filter(
+    year >= 2024,
+    zoning == "RS",
+    between(units_added, 5, 8)
+  ) |>
+  group_by(
+    nbhd_f = fct(neighbourhood, levels = unique(bp$neighbourhood)),
+    .drop = FALSE
+  ) |>
+  summarize(
+    n_permits = n(),
+    units_added = sum(units_added),
+    .groups = "drop"
+  ) |>
+  mutate(neighbourhood = as.character(nbhd_f), .keep = "unused")
+
+cumulative_plexes_by_nbhd |>
+  left_join(n_rs_by_nbhd, by = "neighbourhood") |>
+  left_join(population_change, by = "neighbourhood") |>
+  filter(!is.na(n_properties)) |>
+  mutate(
+    neighbourhood = str_to_title(neighbourhood),
+    pct_redevelop = n_permits / n_properties
+  ) |>
+  arrange(neighbourhood) |>
+  gt() |>
+  cols_move(Ward, after = neighbourhood) |>
+  cols_move(n_properties, after = n_permits) |>
+  cols_move(pct_redevelop, after = n_properties) |>
+  cols_move(units_added, after = pct_redevelop) |>
+  cols_label(
+    neighbourhood = "Neighbourhood",
+    Ward = "Ward",
+    n_permits = "Permits",
+    units_added = "Homes added",
+    n_properties = "RS properties",
+    pct_redevelop = "% redeveloped",
+    n_2021 = "Population 2021",
+    n_1971 = "Population 1971",
+    pct_change = "Pop. change"
+  ) |>
+  fmt_integer(
+    columns = c(n_permits, units_added, n_properties, n_2021, n_1971)
+  ) |>
+  fmt_percent(columns = c(pct_redevelop, pct_change), decimals = 1) |>
+  tab_header(
+    title = "Cumulative 5–8 unit RS permits by neighbourhood",
+    subtitle = "2024 + 2025 + Q1 2026 building permits"
+  ) |>
+  finalize_gt(interactive = TRUE) |>
+  opt_stylize_jd() |>
+  sub_missing()
+```
+
+## The eight-unit concentration
+
+In 2025, projects with exactly eight units dominated the Fiveplex to Eightplex category in the RS Zone, a direct consequence of the eight-unit cap. Unlike the [previous analysis](../../2025/real-rs-story/index.qmd), which focused on 5–8 unit projects, @tbl-unit-breakdown covers all RS Zone permits from 1 to 8 units. We can see the most common unit counts are 1, 2, 4, and 8. However, the single biggest driver is the 8 unit rowhomes, providing around half of small-scale homes in mature RS-zoned neighbourhoods.
+
+Given that 8-unit projects account for roughly half the small-scale supply, I continue to be glad that City Council chose not to reduce the number of units permitted to 6.
+This is an evidence-backed choice that will pay dividends for years to come.
+
+```{r}
+#| label: tbl-unit-breakdown
+#| tbl-cap: "RS Zone 1-8 unit permits by exact unit count, Q1 2025 vs Q1 2026"
+q1_unit_breakdown <- function(yr) {
+  bp_q1 |>
+    st_drop_geometry() |>
+    filter(year == yr, zoning == "RS", between(units_added, 1, 8)) |>
+    group_by(units_added) |>
+    summarize(
+      n_permits = n(),
+      total_units = sum(units_added),
+      .groups = "drop"
+    ) |>
+    rename_with(~ paste0(., "_", yr), c(n_permits, total_units))
+}
+
+q1_unit_breakdown(2025) |>
+  full_join(q1_unit_breakdown(2026), by = "units_added") |>
+  replace_na(list(
+    n_permits_2025 = 0,
+    total_units_2025 = 0,
+    n_permits_2026 = 0,
+    total_units_2026 = 0
+  )) |>
+  arrange(units_added) |>
+  gt(rowname_col = "units_added") |>
+  cols_label(
+    n_permits_2025 = "Permits (Q1 2025)",
+    total_units_2025 = "Homes (Q1 2025)",
+    n_permits_2026 = "Permits (Q1 2026)",
+    total_units_2026 = "Homes (Q1 2026)"
+  ) |>
+  tab_stubhead("Units per permit") |>
+  fmt_integer(columns = everything()) |>
+  tab_header(
+    title = "RS Zone: permits by unit count",
+    subtitle = "Q1 2025 vs. Q1 2026"
+  ) |>
+  grand_summary_rows(fns = "sum") |>
+  finalize_gt() |>
+  opt_stylize_jd()
+```
+
+## Building close to transit
+
+2025 set a record for the proportion of homes permitted within 800m of transit. Is that trend continuing in 2026? @fig-ecdf-transit compares the cumulative distribution of Q1 homes by distance from the nearest LRT stop, across recent years.
+Once again, we are on track for a record year for building homes near transit.
+Within 800m of transit, the cumulative share of homes is `r scales::percent(pct_800m_q1_2026, accuracy=1)` in Q1 2026, compared to `r scales::percent(pct_800m_2025, accuracy=1)` in 2025.
+The line for 2026 is above and to the left of the line for 2025, meaning homes are being built overall closer to transit in Q1 2026 than in 2025.
+
+```{r}
+#| label: fig-ecdf-transit
+#| fig-cap: "Cumulative distribution of Q1 homes by distance from nearest LRT stop"
+bp |>
+  filter(!st_is_empty(geometry)) |>
+  add_transit_distance(transit_stops) |>
+  add_ecdf_by_distance(group_var = year) |>
+  st_drop_geometry() |>
+  ggplot() +
+  layers_transit_ecdf(colour_var = year, x_max = 8) +
+  labs(
+    title = "Where are homes being built relative to LRT?",
+    subtitle = "Cumulative distribution of homes by distance from nearest LRT stop",
+    x = "Distance from nearest LRT stop (km)",
+    y = "Cumulative share of homes",
+    colour = "Year",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+If you are a map kind of person, @fig-rowhome-lrt-dist-map shows that the 5-8 unit rowhomes continue to trace the path of the LRT.
+
+```{r}
+#| label: fig-rowhome-lrt-dist-map
+#| fig-cap: "Map of Q1 2026 5–8 unit RS Zone permits relative to LRT"
+buffers <- make_transit_buffers(transit_stops)
+
+ggplot(filter(buffers, radius == "2km")) +
+  layers_map_base(mode = "light", roads_type = "all") +
+  geom_sf(
+    data = buffers,
+    mapping = aes(linetype = radius),
+    colour = "firebrick"
+  ) +
+  scale_linetype_manual(
+    values = c("1km" = "dotted", "1.5km" = "dashed", "2km" = "solid")
+  ) +
+  geom_sf(
+    data = filter(
+      bp_q1,
+      year == 2026,
+      zoning == "RS",
+      between(units_added, 5, 8)
+    ),
+    size = 0.5,
+    colour = "steelblue"
+  ) +
+  geom_sf(data = transit_stops, shape = 21, colour = "firebrick", fill = NA) +
+  theme_map(mode = "light") +
+  labs(
+    title = "Map of all Q1 2026 5–8 unit building permits in the RS Zone",
+    caption = CAPTION_COE
+  )
+```
+
+## Conclusions
+
+2026 is shaping up to be another strong year for housing supply in Edmonton.
+We are building more homes in mature neighbourhoods, more types of homes, more homes near transit, and an overall higher number of homes than historical norms.
+The RS Zone continues to be a key part of this story, with the 5-8 unit rowhome category leading the way in mature neighbourhoods. The data continues to show that when given the option, people choose to live in more central locations, even if not in a single-detached home.
+
+We're already seeing the effects of increased housing supply in Edmonton over the past two years. Rents are coming down and landlords are offering incentives. With even more supply on the way, especially in mature neighbourhoods, I am excited about the potential for more affordable, transit-accessible housing options for Edmontonian families in the years to come.
+
+The data continues to make the case for the RS Zone. Every quarter of data at this pace is another argument for keeping, and strengthening, the policies that are producing these results. If you'd like to help advocate for more housing choice in Edmonton, consider joining [Grow Together Edmonton](https://www.growtogetheryeg.com/).
