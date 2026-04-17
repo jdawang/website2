@@ -1,6 +1,7 @@
 ---
 title: "2026 Q1 Edmonton building permit report"
 date: "2026-04-16"
+date-modified: "2026-04-17"
 author: "Jacob Dawang"
 categories: [housing, edmonton, zoning]
 description: "A first look at 2026 building permits through Q1, tracking whether Edmonton will continue the record-breaking momentum of 2025."
@@ -161,12 +162,11 @@ assessment_rs <- assessment_rs |>
   left_join(nbhd_type_lookup, by = "neighbourhood")
 
 # Population and ward data
-wards <- read_csv(
-  "../../../data/Neighbourhoods_and_Wards_20250703.csv",
-  show_col_types = FALSE
+wards <- read_sf(
+  "../../../data/City_of_Edmonton_-_Neighbourhoods_20260417.geojson"
 ) |>
-  select(neighbourhood = `Neighbourhood Name`, Ward) |>
-  mutate(neighbourhood = str_to_upper(neighbourhood))
+  st_drop_geometry() |>
+  select(neighbourhood = name, Ward = civic_ward_name)
 
 population_1971 <- read_csv(
   "../../../data/population_1971.csv",
