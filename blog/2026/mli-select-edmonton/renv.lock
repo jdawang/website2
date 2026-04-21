@@ -1056,7 +1056,7 @@
       "RemoteUsername": "jdawang",
       "RemoteRepo": "jdawangHelpers",
       "RemoteRef": "main",
-      "RemoteSha": "b3d1f626bdba01cd2be91293d4ecb619537fb84c",
+      "RemoteSha": "82f1c8d23af93058a270381625b601475e5116f9",
       "Requirements": [
         "R",
         "dplyr",
@@ -1072,7 +1072,7 @@
         "units",
         "viridis"
       ],
-      "Hash": "b1f77dc2912f72c4c9c6d43597612e05"
+      "Hash": "a04dd9565b629da60d0c0fed9c97e5d8"
     },
     "jpeg": {
       "Package": "jpeg",

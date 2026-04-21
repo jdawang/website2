@@ -1,8 +1,8 @@
 ---
 title: "Edmonton's zoning reform created hundreds of affordable homes"
-date: "2026-04-06"
+date: "2026-04-20"
 author: "Jacob Dawang"
-categories: [housing, edmonton, affordability]
+categories: [housing, edmonton, cmhc, zoning]
 description: "Edmonton's 2024 Zoning Bylaw Renewal unlocked federal affordable housing financing. An analysis of CMHC MLI Select data shows Edmonton's rezoning has already generated hundreds of mandated-affordable units."
 link-external-newwindow: true
 link-external-icon: false
@@ -377,13 +377,10 @@ mli_small_affordable |>
     fns = list(Total ~ sum(.)),
     fmt = ~ fmt_integer(.)
   ) |>
-  tab_style(
-    style = cell_fill(color = "#FFF3E0"),
-    locations = cells_body(rows = year >= 2024)
-  ) |>
   tab_header(
     "Estimated affordable units from small infill MLI Select, by year"
   ) |>
+  opt_stylize_jd(mode = "light") |>
   finalize_gt(source = "Jacob Dawang, CMHC, City of Edmonton Open Data")
 ```
 
