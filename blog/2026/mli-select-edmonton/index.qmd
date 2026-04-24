@@ -1,6 +1,6 @@
 ---
 title: "MLI Select and ZBR sitting in a tree, b-u-i-l-d-i-n-g"
-date: "2026-04-23"
+date: "2026-04-24"
 author: "Jacob Dawang"
 categories: [housing, edmonton, cmhc, zoning]
 description: "Edmonton's 2024 Zoning Bylaw Renewal unlocked federal affordable housing financing. An analysis of CMHC MLI Select data shows Edmonton's rezoning has already generated hundreds of mandated-affordable units."
