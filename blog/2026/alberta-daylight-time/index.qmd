@@ -1,0 +1,135 @@
+---
+title: "Alberta daylight time"
+date: "2026-04-21"
+author: "Jacob Dawang"
+categories: [map, time, alberta]
+description: "When will sun rise and set when Alberta will switch to daylight time?"
+link-external-newwindow: true
+link-external-icon: false
+execute:
+  cache: false
+---
+
+```{r}
+#| label: imports
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path = Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key = Sys.getenv("NEXTZEN_API_KEY")
+)
+
+library(cancensus)
+library(tidyverse)
+library(jdawangHelpers)
+library(sf)
+library(ggplot2)
+library(lubridate)
+library(suntools)
+library(mountainmathHelpers)
+library(hms)
+```
+
+```{r}
+#| label: load-data
+alberta_geos <- get_census(
+  dataset = "CA21",
+  regions = list(PR = "48"),
+  level = "PR",
+  geo_format = "sf"
+)
+
+crs <- lambert_conformal_conic_at(alberta_geos)
+alberta_geos <- st_transform(alberta_geos, crs)
+
+alberta_grid <- st_make_grid(alberta_geos, square = FALSE, n = c(100, 50)) %>%
+  st_intersection(alberta_geos) %>%
+  st_as_sf() %>%
+  mutate(id = row_number())
+alberta_points <- st_centroid(alberta_grid) %>%
+  st_as_sf()
+
+edmonton_point <- read_sf(
+  "../../../data/City of Edmonton Ward Boundary and Council Composition_Current_20250618.geojson"
+) %>%
+  st_union() %>%
+  st_centroid() %>%
+  st_transform(crs)
+
+calgary_point <- tibble(
+  name = "Calgary",
+  geometry = st_sfc(st_point(c(-114.0708, 51.0486)), crs = 4326)
+) %>%
+  st_as_sf() %>%
+  st_transform(crs)
+```
+
+```{r}
+#| label: enhance-data-with-time
+times <- map(
+  seq(ymd("2026-11-21"), ymd("2027-10-21"), by = "1 month"),
+  function(date) {
+    sunrises <- sunriset(
+      st_transform(alberta_points, 4326),
+      date = as.POSIXct(date),
+      direction = "sunrise",
+      POSIXct.out = TRUE
+    ) %>%
+      pull(time)
+
+    sunsets <- sunriset(
+      st_transform(alberta_points, 4326),
+      date = as.POSIXct(date),
+      direction = "sunset",
+      POSIXct.out = TRUE
+    ) %>%
+      pull(time)
+
+    alberta_points %>%
+      mutate(
+        date = date,
+        sunrise = sunrises,
+        sunset = sunsets
+      )
+  }
+) %>%
+  bind_rows()
+```
+
+```{r}
+#| label: plot
+times %>%
+  filter(date == ymd("2026-12-21")) %>%
+  mutate(
+    sunrise = sunrise %>% with_tz("GMT+6") %>% as_hms() %>% as.POSIXct()
+  ) %>%
+  mutate(
+    sunrise_bucket = case_when(
+      sunrise < parse_hms("07:00:00") ~ "Before 7am",
+      sunrise < parse_hms("08:00:00") ~ "7am-8am",
+      sunrise < parse_hms("09:00:00") ~ "8am-9am",
+      sunrise < parse_hms("10:00:00") ~ "9am-10am",
+      .default = "After 10am"
+    )
+  ) %>%
+  st_drop_geometry() %>%
+  left_join(alberta_grid, by = "id") %>%
+  ggplot() +
+  geom_sf(aes(fill = sunrise, geometry = x), color = NA) +
+  scale_fill_viridis_b(
+    option = "magma",
+    direction = -1,
+    trans = "time",
+    n.breaks = 7,
+    guide = guide_colorbar()
+  ) +
+  geom_sf(data = edmonton_point, size = 2, colour = "black") +
+  geom_sf(data = calgary_point, size = 2, colour = "black") +
+  theme_map(mode = "light") +
+  labs(
+    title = "Sunrise time in Alberta",
+    subtitle = "On December 21",
+    fill = "Sunrise time",
+    caption = "Jacob Dawang",
+  )
+```
