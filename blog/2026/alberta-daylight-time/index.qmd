@@ -3,24 +3,18 @@ title: "Alberta daylight time"
 date: "2026-04-30"
 author: "Jacob Dawang"
 categories: [alberta, edmonton]
-description: "Alberta is switching to permanent daylight time. This will mean our winter mornings will be much darker. Kids will be going to school in pitch dark for most of the winter. This post visualizes sunrise and sunset times across Alberta under both the current standard time and the proposed permanent daylight time."
+description: "Alberta is switching to permanent daylight time. People generally get the vibe of what this means: more sunlight in the evenings, more darkness in the mornings. But, I don't think we understand exactly what this looks like concretely."
 link-external-newwindow: true
 link-external-icon: false
 execute:
   cache: true
 ---
 
-Alberta is switching to permanent daylight time.
-People generally get the vibe of what this means: more sunlight in the evenings, more darkness in the mornings.
-But, I don't think we understand exactly what this looks like concretely.
-Whatever your opinion on the policy, it's important to know what we're getting into.
+Alberta is switching to permanent daylight time. People generally get the vibe of what this means: more sunlight in the evenings, more darkness in the mornings. But, I don't think we understand exactly what this looks like concretely. Whatever your opinion on the policy, it's important to know what we're getting into.
 
-Personally, I would prefer permanent standard time as the benefits of more light in the morning is important to circadian rhythm.
-In the 70s, the United States experimented with permanent daylight time, and it only lasted one winter before they switched back to standard time.
-Support went from something like 80% in favour of permanent daylight time before the experiment, to only 40% after.
+Personally, I would prefer permanent standard time as the benefits of more light in the morning is important to circadian rhythm. In the 70s, the United States experimented with permanent daylight time, and it only lasted one winter before they switched back to standard time. Support went from something like 80% in favour of permanent daylight time before the experiment, to only 40% after.
 
-Anyway, in this post, I visualize sunrise and sunset times across Alberta under both the current standard time (UTC−7) and the proposed permanent daylight time (UTC−6).
-Yes, as usual, there are maps, but let's start with a deep-dive into Edmonton and Calgary, the two largest cities in the province.
+Anyway, in this post, I visualize sunrise and sunset times across Alberta under both the current standard time (UTC−7) and the proposed permanent daylight time (UTC−6). Yes, as usual, there are maps, but let's start with a deep-dive into Edmonton and Calgary, the two largest cities in the province.
 
 ```{r}
 #| label: imports
@@ -141,25 +135,15 @@ edmonton_daylight_data <- edmonton_times %>%
   mutate(date_dodged = date + if_else(`Time Regime` == "daylight", 1L, -1L))
 ```
 
-@fig-edmonton-daylight shows sunrise and sunset times in Edmonton from October to March under both time regimes.
-The dashed vertical lines mark 8:00, 9:00, 17:00, and 18:00, which are common reference points for "early morning", "late morning", "early evening", and "late evening".
+@fig-edmonton-daylight shows sunrise and sunset times in Edmonton from October to March under both time regimes. The dashed vertical lines mark 8:00, 9:00, 17:00, and 18:00, which are common reference points for "early morning", "late morning", "early evening", and "late evening".
 
-Under standard time, yes, sunrise is after 8:00 starting in mid-November, but it doesn't get as late as 9:00 until early January.
-As early as February, sunrise is back to being before 9:00.
-There are a few dark mornings in December and January, but for most of the winter, people in Edmonton will see the sun at some point in their morning routine.
-That means people will be waking up to some light, commuting to work, and taking their kids to school in the light for the majority of the winter. 
+Under standard time, yes, sunrise is after 8:00 starting in mid-November, but it doesn't get as late as 9:00 until early January. As early as February, sunrise is back to being before 9:00. There are a few dark mornings in December and January, but for most of the winter, people in Edmonton will see the sun at some point in their morning routine. That means people will be waking up to some light, commuting to work, and taking their kids to school in the light for the majority of the winter.
 
-On the other hand, with daylight time, sunrise will be after 9:00 from November, all the way until mid-February.
-For most of the winter, it will be pitch black from the time people wake up all the way until they arrive at work or school.
-Taking kids to school will be done completely in the dark for most of the winter.
+On the other hand, with daylight time, sunrise will be after 9:00 from November, all the way until mid-February. For most of the winter, it will be pitch black from the time people wake up all the way until they arrive at work or school. Taking kids to school will be done completely in the dark for most of the winter.
 
-When it comes to sunsets, the difference is flipped.
-Under standard time, sunset is before 17:00 from early November until mid-February, meaning that most of the evening commute and after-work activities will be in the dark for most of the winter.
-However, sunset is still after 16:00 every single month, which means schools will dismiss kids while it's still light out, and there will be some daylight for after-school activities.
+When it comes to sunsets, the difference is flipped. Under standard time, sunset is before 17:00 from early November until mid-February, meaning that most of the evening commute and after-work activities will be in the dark for most of the winter. However, sunset is still after 16:00 every single month, which means schools will dismiss kids while it's still light out, and there will be some daylight for after-school activities.
 
-With daylight time, sunset is after 17:00 every single day, but is still before 18:00 during the darkest months.
-That means that the evening commute will generally be light and there may be time for early commuters to get home and do some evening activities in the light. 
-
+With daylight time, sunset is after 17:00 every single day, but is still before 18:00 during the darkest months. That means that the evening commute will generally be light and there may be time for early commuters to get home and do some evening activities in the light.
 
 ```{r}
 #| label: fig-edmonton-daylight
@@ -303,6 +287,7 @@ calgary_daylight_data %>%
 ```
 
 ## Alberta maps
+
 ```{r}
 #| label: enhance-data-with-time
 times <- map(
@@ -380,9 +365,7 @@ prepped_sunset <- times %>%
   mutate(date_label = fct_inorder(fct(format(date, "%B %d"))))
 ```
 
-Beyond Edmonton and Calgary, the rest of Alberta will see similar patterns. @fig-sunrise-times shows sunrise times across the province on December 21, the darkest day of the year, under both time regimes.
-I feel bad for the folks in the westernmost and northernmost parts of the province who will have extremely late sunrises.
-
+Beyond Edmonton and Calgary, the rest of Alberta will see similar patterns. @fig-sunrise-times shows sunrise times across the province on December 21, the darkest day of the year, under both time regimes. I feel bad for the folks in the westernmost and northernmost parts of the province who will have extremely late sunrises.
 
 ```{r}
 #| label: fig-sunrise-times
