@@ -1,5 +1,5 @@
 ---
-title: "Alberta daylight time"
+title: "Visualizing Alberta's shift to permanent daylight time"
 date: "2026-04-30"
 author: "Jacob Dawang"
 categories: [alberta, edmonton]
