@@ -1,14 +1,26 @@
 ---
 title: "Alberta daylight time"
-date: "2026-04-21"
+date: "2026-04-30"
 author: "Jacob Dawang"
-categories: [map, time, alberta]
-description: "When will sun rise and set when Alberta will switch to daylight time?"
+categories: [alberta, edmonton]
+description: "Alberta is switching to permanent daylight time. This will mean our winter mornings will be much darker. Kids will be going to school in pitch dark for most of the winter. This post visualizes sunrise and sunset times across Alberta under both the current standard time and the proposed permanent daylight time."
 link-external-newwindow: true
 link-external-icon: false
 execute:
-  cache: false
+  cache: true
 ---
+
+Alberta is switching to permanent daylight time.
+People generally get the vibe of what this means: more sunlight in the evenings, more darkness in the mornings.
+But, I don't think we understand exactly what this looks like concretely.
+Whatever your opinion on the policy, it's important to know what we're getting into.
+
+Personally, I would prefer permanent standard time as the benefits of more light in the morning is important to circadian rhythm.
+In the 70s, the United States experimented with permanent daylight time, and it only lasted one winter before they switched back to standard time.
+Support went from something like 80% in favour of permanent daylight time before the experiment, to only 40% after.
+
+Anyway, in this post, I visualize sunrise and sunset times across Alberta under both the current standard time (UTC−7) and the proposed permanent daylight time (UTC−6).
+Yes, as usual, there are maps, but let's start with a deep-dive into Edmonton and Calgary, the two largest cities in the province.
 
 ```{r}
 #| label: imports
@@ -28,6 +40,7 @@ library(lubridate)
 library(suntools)
 library(mountainmathHelpers)
 library(hms)
+library(gganimate)
 ```
 
 ```{r}
@@ -42,7 +55,7 @@ alberta_geos <- get_census(
 crs <- lambert_conformal_conic_at(alberta_geos)
 alberta_geos <- st_transform(alberta_geos, crs)
 
-alberta_grid <- st_make_grid(alberta_geos, square = FALSE, n = c(100, 50)) %>%
+alberta_grid <- st_make_grid(alberta_geos, square = FALSE, n = c(150, 75)) %>%
   st_intersection(alberta_geos) %>%
   st_as_sf() %>%
   mutate(id = row_number())
@@ -54,20 +67,246 @@ edmonton_point <- read_sf(
 ) %>%
   st_union() %>%
   st_centroid() %>%
-  st_transform(crs)
+  st_transform(crs) %>%
+  st_as_sf() %>%
+  st_set_geometry("geometry") %>%
+  mutate(city = "Edmonton")
 
 calgary_point <- tibble(
-  name = "Calgary",
+  city = "Calgary",
   geometry = st_sfc(st_point(c(-114.0708, 51.0486)), crs = 4326)
 ) %>%
   st_as_sf() %>%
   st_transform(crs)
+
+city_points <- bind_rows(edmonton_point, calgary_point)
 ```
 
+## Edmonton deep-dive
+
+```{r}
+#| label: edmonton-times
+edmonton_weekly_dates <- seq(
+  ymd("2026-10-21"),
+  ymd("2027-03-21"),
+  by = "1 week"
+)
+edmonton_point_4326 <- st_transform(edmonton_point, 4326)
+
+edmonton_times <- map_dfr(edmonton_weekly_dates, function(d) {
+  sunrise <- sunriset(
+    edmonton_point_4326,
+    as.POSIXct(d),
+    direction = "sunrise",
+    POSIXct.out = TRUE
+  ) %>%
+    pull(time)
+  sunset <- sunriset(
+    edmonton_point_4326,
+    as.POSIXct(d),
+    direction = "sunset",
+    POSIXct.out = TRUE
+  ) %>%
+    pull(time)
+  tibble(date = d, sunrise_utc = sunrise, sunset_utc = sunset)
+})
+
+edmonton_daylight_data <- edmonton_times %>%
+  mutate(
+    sunrise_standard = sunrise_utc %>%
+      with_tz("GMT+7") %>%
+      as_hms() %>%
+      as.POSIXct(),
+    sunset_standard = sunset_utc %>%
+      with_tz("GMT+7") %>%
+      as_hms() %>%
+      as.POSIXct(),
+    sunrise_daylight = sunrise_utc %>%
+      with_tz("GMT+6") %>%
+      as_hms() %>%
+      as.POSIXct(),
+    sunset_daylight = sunset_utc %>%
+      with_tz("GMT+6") %>%
+      as_hms() %>%
+      as.POSIXct()
+  ) %>%
+  select(date, starts_with("sunrise_"), starts_with("sunset_")) %>%
+  pivot_longer(
+    cols = c(starts_with("sunrise_"), starts_with("sunset_")),
+    names_to = c(".value", "scenario"),
+    names_sep = "_"
+  ) %>%
+  filter(scenario != "utc") %>%
+  rename(`Time Regime` = scenario) %>%
+  mutate(date_dodged = date + if_else(`Time Regime` == "daylight", 1L, -1L))
+```
+
+@fig-edmonton-daylight shows sunrise and sunset times in Edmonton from October to March under both time regimes.
+The dashed vertical lines mark 8:00, 9:00, 17:00, and 18:00, which are common reference points for "early morning", "late morning", "early evening", and "late evening".
+
+Under standard time, yes, sunrise is after 8:00 starting in mid-November, but it doesn't get as late as 9:00 until early January.
+As early as February, sunrise is back to being before 9:00.
+There are a few dark mornings in December and January, but for most of the winter, people in Edmonton will see the sun at some point in their morning routine.
+That means people will be waking up to some light, commuting to work, and taking their kids to school in the light for the majority of the winter. 
+
+On the other hand, with daylight time, sunrise will be after 9:00 from November, all the way until mid-February.
+For most of the winter, it will be pitch black from the time people wake up all the way until they arrive at work or school.
+Taking kids to school will be done completely in the dark for most of the winter.
+
+When it comes to sunsets, the difference is flipped.
+Under standard time, sunset is before 17:00 from early November until mid-February, meaning that most of the evening commute and after-work activities will be in the dark for most of the winter.
+However, sunset is still after 16:00 every single month, which means schools will dismiss kids while it's still light out, and there will be some daylight for after-school activities.
+
+With daylight time, sunset is after 17:00 every single day, but is still before 18:00 during the darkest months.
+That means that the evening commute will generally be light and there may be time for early commuters to get home and do some evening activities in the light. 
+
+
+```{r}
+#| label: fig-edmonton-daylight
+#| fig-cap: "Edmonton sunrise and sunset times, October to March"
+edmonton_daylight_data %>%
+  ggplot(aes(colour = `Time Regime`)) +
+  geom_segment(
+    aes(x = sunrise, xend = sunset, y = date_dodged, yend = date_dodged),
+    linewidth = 0.9
+  ) +
+  geom_point(aes(x = sunrise, y = date_dodged), size = 2) +
+  geom_point(aes(x = sunset, y = date_dodged), size = 2) +
+  geom_vline(
+    xintercept = as.POSIXct(parse_hms(c(
+      "08:00:00",
+      "09:00:00",
+      "17:00:00",
+      "18:00:00"
+    ))),
+    linetype = "dashed",
+  ) +
+  scale_x_datetime(date_labels = "%H:%M", date_breaks = "1 hour") +
+  scale_y_date(
+    breaks = seq(ymd("2026-11-01"), ymd("2027-03-01"), by = "1 month"),
+    date_labels = "%b %d",
+  ) +
+  scale_colour_brewer(
+    palette = "Set1",
+    guide = guide_legend(position = "bottom")
+  ) +
+  theme_jd(mode = "light") +
+  labs(
+    title = "Edmonton daylight hours",
+    subtitle = "Sunrise to sunset under standard time (UTC−7) vs daylight time (UTC−6)",
+    x = NULL,
+    y = NULL,
+    colour = NULL,
+    caption = "Jacob Dawang"
+  )
+```
+
+## Calgary deep-dive
+
+```{r}
+#| label: calgary-times
+calgary_weekly_dates <- seq(
+  ymd("2026-10-21"),
+  ymd("2027-03-21"),
+  by = "1 week"
+)
+calgary_point_4326 <- st_transform(calgary_point, 4326)
+
+calgary_times <- map_dfr(calgary_weekly_dates, function(d) {
+  sunrise <- sunriset(
+    calgary_point_4326,
+    as.POSIXct(d),
+    direction = "sunrise",
+    POSIXct.out = TRUE
+  ) %>%
+    pull(time)
+  sunset <- sunriset(
+    calgary_point_4326,
+    as.POSIXct(d),
+    direction = "sunset",
+    POSIXct.out = TRUE
+  ) %>%
+    pull(time)
+  tibble(date = d, sunrise_utc = sunrise, sunset_utc = sunset)
+})
+
+calgary_daylight_data <- calgary_times %>%
+  mutate(
+    sunrise_standard = sunrise_utc %>%
+      with_tz("GMT+7") %>%
+      as_hms() %>%
+      as.POSIXct(),
+    sunset_standard = sunset_utc %>%
+      with_tz("GMT+7") %>%
+      as_hms() %>%
+      as.POSIXct(),
+    sunrise_daylight = sunrise_utc %>%
+      with_tz("GMT+6") %>%
+      as_hms() %>%
+      as.POSIXct(),
+    sunset_daylight = sunset_utc %>%
+      with_tz("GMT+6") %>%
+      as_hms() %>%
+      as.POSIXct()
+  ) %>%
+  select(date, starts_with("sunrise_"), starts_with("sunset_")) %>%
+  pivot_longer(
+    cols = c(starts_with("sunrise_"), starts_with("sunset_")),
+    names_to = c(".value", "scenario"),
+    names_sep = "_"
+  ) %>%
+  filter(scenario != "utc") %>%
+  rename(`Time Regime` = scenario) %>%
+  mutate(date_dodged = date + if_else(`Time Regime` == "daylight", 1L, -1L))
+```
+
+The same observations hold for Calgary in @fig-calgary-daylight, but the effects are less extreme given it's further south.
+
+```{r}
+#| label: fig-calgary-daylight
+#| fig-cap: "Calgary sunrise and sunset times, October to March"
+calgary_daylight_data %>%
+  ggplot(aes(colour = `Time Regime`)) +
+  geom_segment(
+    aes(x = sunrise, xend = sunset, y = date_dodged, yend = date_dodged),
+    linewidth = 0.9
+  ) +
+  geom_point(aes(x = sunrise, y = date_dodged), size = 2) +
+  geom_point(aes(x = sunset, y = date_dodged), size = 2) +
+  geom_vline(
+    xintercept = as.POSIXct(parse_hms(c(
+      "08:00:00",
+      "09:00:00",
+      "17:00:00",
+      "18:00:00"
+    ))),
+    linetype = "dashed",
+  ) +
+  scale_x_datetime(date_labels = "%H:%M", date_breaks = "1 hour") +
+  scale_y_date(
+    breaks = seq(ymd("2026-11-01"), ymd("2027-03-01"), by = "1 month"),
+    date_labels = "%b %d",
+  ) +
+  scale_colour_brewer(
+    palette = "Set1",
+    guide = guide_legend(position = "bottom")
+  ) +
+  theme_jd(mode = "light") +
+  labs(
+    title = "Calgary daylight hours",
+    subtitle = "Sunrise to sunset under standard time (UTC−7) vs daylight time (UTC−6)",
+    x = NULL,
+    y = NULL,
+    colour = NULL,
+    caption = "Jacob Dawang"
+  )
+```
+
+## Alberta maps
 ```{r}
 #| label: enhance-data-with-time
 times <- map(
-  seq(ymd("2026-11-21"), ymd("2027-10-21"), by = "1 month"),
+  seq(ymd("2026-10-21"), ymd("2027-03-21"), by = "1 month"),
   function(date) {
     sunrises <- sunriset(
       st_transform(alberta_points, 4326),
@@ -97,39 +336,195 @@ times <- map(
 ```
 
 ```{r}
-#| label: plot
-times %>%
-  filter(date == ymd("2026-12-21")) %>%
+#| label: prep-data-for-plotting
+prepped_sunrise <- times %>%
   mutate(
-    sunrise = sunrise %>% with_tz("GMT+6") %>% as_hms() %>% as.POSIXct()
-  ) %>%
-  mutate(
-    sunrise_bucket = case_when(
-      sunrise < parse_hms("07:00:00") ~ "Before 7am",
-      sunrise < parse_hms("08:00:00") ~ "7am-8am",
-      sunrise < parse_hms("09:00:00") ~ "8am-9am",
-      sunrise < parse_hms("10:00:00") ~ "9am-10am",
-      .default = "After 10am"
-    )
+    `Daylight Time` = sunrise %>%
+      with_tz("GMT+6") %>%
+      as_hms() %>%
+      as.POSIXct(),
+    `Standard Time` = sunrise %>%
+      with_tz("GMT+7") %>%
+      as_hms() %>%
+      as.POSIXct()
   ) %>%
   st_drop_geometry() %>%
+  select(id, date, contains("Time")) %>%
+  pivot_longer(cols = contains("Time")) %>%
+  mutate(value = ceiling_hms(value, 900)) %>%
   left_join(alberta_grid, by = "id") %>%
+  group_by(name, value, date) %>%
+  summarize(geometry = st_union(x), .groups = "drop") %>%
+  arrange(date) %>%
+  mutate(date_label = fct_inorder(fct(format(date, "%B %d"))))
+
+prepped_sunset <- times %>%
+  mutate(
+    `Daylight Time` = sunset %>%
+      with_tz("GMT+6") %>%
+      as_hms() %>%
+      as.POSIXct(),
+    `Standard Time` = sunset %>%
+      with_tz("GMT+7") %>%
+      as_hms() %>%
+      as.POSIXct()
+  ) %>%
+  st_drop_geometry() %>%
+  select(id, date, contains("Time")) %>%
+  pivot_longer(cols = contains("Time")) %>%
+  mutate(value = ceiling_hms(value, 900)) %>%
+  left_join(alberta_grid, by = "id") %>%
+  group_by(name, value, date) %>%
+  summarize(geometry = st_union(x), .groups = "drop") %>%
+  arrange(date) %>%
+  mutate(date_label = fct_inorder(fct(format(date, "%B %d"))))
+```
+
+Beyond Edmonton and Calgary, the rest of Alberta will see similar patterns. @fig-sunrise-times shows sunrise times across the province on December 21, the darkest day of the year, under both time regimes.
+I feel bad for the folks in the westernmost and northernmost parts of the province who will have extremely late sunrises.
+
+
+```{r}
+#| label: fig-sunrise-times
+#| fig-cap: "Sunrise times in Alberta on December 21"
+#| fig-width: 7
+#| fig-height: 8
+#| classes: "preview-image"
+prepped_sunrise %>%
+  filter(date == ymd("2026-12-21")) %>%
   ggplot() +
-  geom_sf(aes(fill = sunrise, geometry = x), color = NA) +
+  geom_sf(aes(fill = value, geometry = geometry), color = NA) +
   scale_fill_viridis_b(
     option = "magma",
     direction = -1,
     trans = "time",
-    n.breaks = 7,
-    guide = guide_colorbar()
+    n.breaks = 10,
+    guide = guide_coloursteps(
+      title.position = "top",
+      barwidth = 30,
+      barheight = 1.2,
+      show.limits = FALSE
+    ),
+    limits = as.POSIXct(parse_hms(c("08:15:00", "11:00:00")))
   ) +
-  geom_sf(data = edmonton_point, size = 2, colour = "black") +
-  geom_sf(data = calgary_point, size = 2, colour = "black") +
+  facet_grid(cols = vars(name)) +
+  geom_sf(data = city_points, size = 2, colour = "black") +
   theme_map(mode = "light") +
+  theme(legend.position = "bottom", legend.text = element_text(size = 10)) +
   labs(
     title = "Sunrise time in Alberta",
     subtitle = "On December 21",
-    fill = "Sunrise time",
+    fill = NULL,
     caption = "Jacob Dawang",
   )
+```
+
+For completeness, @fig-sunset-times shows sunset times across the province on December 21 under both time regimes.
+
+```{r}
+#| label: fig-sunset-times
+#| fig-cap: "Sunset times in Alberta on December 21"
+#| fig-width: 7
+#| fig-height: 8
+prepped_sunset %>%
+  filter(date == ymd("2026-12-21")) %>%
+  ggplot() +
+  geom_sf(aes(fill = value, geometry = geometry), color = NA) +
+  scale_fill_viridis_b(
+    option = "magma",
+    direction = 1,
+    trans = "time",
+    n.breaks = 9,
+    guide = guide_coloursteps(
+      title.position = "top",
+      barwidth = 30,
+      barheight = 1.2,
+      show.limits = FALSE
+    ),
+    limits = as.POSIXct(parse_hms(c("15:15:00", "18:00:00")))
+  ) +
+  facet_grid(cols = vars(name)) +
+  geom_sf(data = city_points, size = 2, colour = "black") +
+  theme_map(mode = "light") +
+  theme(legend.position = "bottom", legend.text = element_text(size = 10)) +
+  labs(
+    title = "Sunset time in Alberta",
+    subtitle = "On December 21",
+    fill = NULL,
+    caption = "Jacob Dawang",
+  )
+```
+
+As a final visualization, I made animations of sunrise and sunset times in @fig-anim-sunrise-times across the province from October to March under both time regimes. You can see the changing sunrise and sunset times across the province as the days get darker and then lighter again.
+
+```{r}
+#| label: fig-anim-sunrise-times
+#| fig-cap: "Sunrise times in Alberta from October to March"
+#| fig-height: 6.5
+p_sunrise <- prepped_sunrise %>%
+  ggplot() +
+  geom_sf(aes(fill = value, geometry = geometry), color = NA) +
+  scale_fill_viridis_b(
+    option = "magma",
+    direction = -1,
+    trans = "time",
+    n.breaks = 10,
+    guide = guide_coloursteps(
+      title.position = "top",
+      barwidth = 25,
+      barheight = 1,
+      show.limits = FALSE
+    ),
+    limits = as.POSIXct(parse_hms(c("08:15:00", "11:00:00")))
+  ) +
+  facet_grid(cols = vars(name)) +
+  geom_sf(data = city_points, size = 2, colour = "black") +
+  theme_map(mode = "light") +
+  theme(legend.position = "bottom", legend.text = element_text(size = 8)) +
+  labs(
+    title = "Sunrise time in Alberta",
+    subtitle = "On {current_frame}",
+    fill = NULL,
+    caption = "Jacob Dawang",
+  ) +
+  transition_manual(date_label)
+
+animate(p_sunrise, duration = 12)
+```
+
+You can see the sunset times changing across the province in @fig-anim-sunset-times as well.
+
+```{r}
+#| label: fig-anim-sunset-times
+#| fig-cap: "Sunset times in Alberta from October to March"
+#| fig-height: 6.5
+p_sunset <- prepped_sunset %>%
+  ggplot() +
+  geom_sf(aes(fill = value, geometry = geometry), color = NA) +
+  scale_fill_viridis_b(
+    option = "magma",
+    direction = 1,
+    trans = "time",
+    n.breaks = 10,
+    guide = guide_coloursteps(
+      title.position = "top",
+      barwidth = 25,
+      barheight = 1,
+      show.limits = FALSE
+    ),
+    limits = as.POSIXct(parse_hms(c("15:15:00", "18:00:00")))
+  ) +
+  facet_grid(cols = vars(name)) +
+  geom_sf(data = city_points, size = 2, colour = "black") +
+  theme_map(mode = "light") +
+  theme(legend.position = "bottom", legend.text = element_text(size = 10)) +
+  labs(
+    title = "Sunset time in Alberta",
+    subtitle = "On {current_frame}",
+    fill = NULL,
+    caption = "Jacob Dawang",
+  ) +
+  transition_manual(date_label)
+
+animate(p_sunset, duration = 12)
 ```
