@@ -1,6 +1,6 @@
 ---
 title: "Visualizing Alberta's shift to permanent daylight time"
-date: "2026-04-30"
+date: "2026-05-02"
 author: "Jacob Dawang"
 categories: [alberta, edmonton]
 description: "Alberta is switching to permanent daylight time. People generally get the vibe of what this means: more sunlight in the evenings, more darkness in the mornings. But, I don't think we understand exactly what this looks like concretely."
