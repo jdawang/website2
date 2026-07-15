@@ -1,5 +1,5 @@
 ---
-title: "Edmonton's infill property tax dividend"
+title: "Edmonton's $14M infill property tax dividend"
 date: "2026-07-16"
 author: "Jacob Dawang"
 categories: [housing, edmonton, zoning, property value]
@@ -21,7 +21,7 @@ Using building permits from 2024, the first year the RS Zone was in force, match
 
 -   **$1.73 billion**: The amount that small-scale infill — 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes — in the RS Zone from 2024-2026 will add to the property tax base at steady state.
 
--   **$14 million per year**: The amount of incremental property tax that the City of Edmonton will collect from RS Zone small-scale infill at steady state.
+-   **$14 million per year**: The amount of incremental property tax that the City of Edmonton will collect from RS Zone small-scale infill at steady state. That's equivalent to a a 0.6% lower property tax rate.
 
 ## Data {#sec-data}
 
