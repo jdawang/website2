@@ -268,7 +268,7 @@ The key challenge is linking a specific building permit to the same physical pro
 
 ### Matching a permit to its assessment record
 
-Account numbers usually persist through redevelopment, but addresses often don't. Legal description (plan/block/lot), seems to be more stable across redevelopment. However, I have two fallbacks for the properties that don't match that way.
+Account numbers usually persist through redevelopment, but addresses often don't. Legal description (plan/block/lot) seems to be more stable across redevelopment. However, I have two fallbacks for the properties that don't match that way.
 
 I parse each side's legal description into a `(plan, block, lot)` key and join on it. A building permit's legal description looks like `Plan 715HW Blk 25 Lot 22`; the historical assessment data records the same parcel as `Plan: 715HW  Block: 25  Lot: 22`.
 
@@ -684,7 +684,7 @@ The match rate holds up close to evenly across all three categories: `r rowhome_
 
 ## Measuring the uplift: the 2024 cohort
 
-I measure completed 2024 lots in all three categories — 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes — against the same assessment-lag and counterfactual-growth machinery. The 5 to 8 unit rowhome is by far the largest category, so I walk through that category first as an example, then apply the same method to the other two.
+I measure completed 2024 lots in all three categories — 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes — using the same assessment-lag and counterfactual-growth machinery.
 
 ### Worked example: the 5 to 8 unit rowhome cohort
 
@@ -716,7 +716,7 @@ rowhome_2024_matched <- rowhome_2024 |>
 n_rowhome_2024_matched <- nrow(rowhome_2024_matched)
 ```
 
-Edmonton issued **`r n_cohort_2024_all`** mature-neighbourhood RS Zone 5-8 unit new-build lots in 2024, of which **`r n_occupancy_by_dec`** had received occupancy by the end of 2025. **`r n_rowhome_2024_matched`** of the `r n_cohort_2024_all` (`r percent(n_rowhome_2024_matched / n_cohort_2024_all, accuracy = 1)`) match both a 2024 baseline and a 2026 assessed value; I use the occupancy dates to decide which of those the 2026 assessment actually reflects as complete.
+Edmonton permitted **`r n_cohort_2024_all`** mature-neighbourhood RS Zone 5-8 unit new-build lots in 2024, of which **`r n_occupancy_by_dec`** had received occupancy by the end of 2025. **`r n_rowhome_2024_matched`** of the `r n_cohort_2024_all` (`r percent(n_rowhome_2024_matched / n_cohort_2024_all, accuracy = 1)`) match both a 2024 baseline and a 2026 assessed value; I use the occupancy dates to decide which of those the 2026 assessment actually reflects as complete.
 
 #### When does the assessment catch up? {#sec-assessment-catch-up}
 
@@ -848,7 +848,7 @@ gt(actual_2024_summary, rowname_col = "status") |>
   opt_stylize_jd()
 ```
 
-That gives a fully-observed total of `r label_dollars_adaptive(sum(actual_2024_summary$total_gross_uplift))` in assessed value uplift already showing up in the 2026 assessment from the 2024 cohort alone. It understates the eventual value of that cohort: the "not yet fully reflected" group is likely still a stale, mid-construction assessment rather than the finished-building value — exactly the gap the model-based extrapolation later in this post is designed to estimate.
+That gives a fully-observed total of `r label_dollars_adaptive(sum(actual_2024_summary$total_gross_uplift))` in assessed value uplift already showing up in the 2026 assessment from the 2024 cohort alone. It understates the eventual value of that cohort: the lots in the "not yet fully reflected" group likely still carry a stale, mid-construction assessment rather than the finished-building value — exactly the gap the model-based extrapolation later in this post is designed to estimate.
 
 #### From gross uplift to a fairer comparison
 
@@ -907,7 +907,7 @@ stopifnot(
 
 Across `r comma(nrow(control_group))` non-redeveloped RS Zone properties in mature neighbourhoods, the median 2024-to-2026 growth ratio is `r round(g, 2)`x, meaning a typical mature-neighbourhood house that wasn't touched still gained about `r percent(g - 1, accuracy = 1)` in assessed value over those two years. I use this as the baseline against which redevelopment uplift is measured.
 
-This brings us to the two measures of property tax uplift. **Net uplift** is the completed 5 to 8 unit rowhome's 2026 value minus `r round(g, 2)` times its 2024 baseline, isolating the redevelopment effect from general market appreciation. **Gross uplift** is the simple, unadjusted difference, shown alongside it for comparison.
+This brings us to the two measures of assessed value uplift. **Net uplift** is the completed 5 to 8 unit rowhome's 2026 value minus `r round(g, 2)` times its 2024 baseline, isolating the redevelopment effect from general market appreciation. **Gross uplift** is the simple, unadjusted difference, shown alongside it for comparison.
 
 @fig-uplift-distribution shows the distribution of both measures across the `r n_final_cohort` matched lots, split by project size.
 
@@ -1039,7 +1039,7 @@ That yields a completed, measured cohort of `r n_plex_final_cohort` 2 to 4 unit 
 
 ### A model for uplift {#sec-model-for-uplift}
 
-The simple rules above ignore everything about a project except its unit count. But uplift plausibly varies with location too: land near LRT stations and in more expensive neighbourhoods could command different completed values. So alongside the flat medians, I fit a single model of gross uplift on units added, distance from the nearest LRT stop, the neighbourhood's median RS-zone assessed value, and a backyard-home indicator. I used a generalized additive model (GAM) rather than a plain linear regression for maximum flexibility.
+The simple rules above ignore everything about a project except its unit count. But uplift plausibly varies with location too: land near LRT stations and in more expensive neighbourhoods could command different completed values. So alongside the flat medians, I fit a single model of gross uplift on units added, distance from the nearest LRT stop, the neighbourhood's median RS-zone assessed value, and a backyard-home indicator. I use a generalized additive model (GAM) rather than a plain linear regression for maximum flexibility.
 
 ```{r}
 #| label: uplift-model
@@ -1098,7 +1098,7 @@ bias_by_cat <- tapply(
 )
 ```
 
-Checking against @tbl-uplift-rules, the model's average predicted uplift across the measured 5 to 8 unit rowhome cohort alone is `r label_dollars_adaptive(mean(predict(uplift_model, final_cohort |> mutate(is_backyard = FALSE))))` per property, in line with the simple rules. What the model adds is the additional prediction accuracy, which matters when extrapolating to hundreds of lots whose size mix and geography differ from the measured cohort's.
+Checking against @tbl-uplift-rules, the model's average predicted uplift across the measured 5 to 8 unit rowhome cohort alone is `r label_dollars_adaptive(mean(predict(uplift_model, final_cohort |> mutate(is_backyard = FALSE))))` per property, in line with the simple rules. What the model adds is additional prediction accuracy, which matters when extrapolating to hundreds of lots whose size mix and geography differ from the measured cohort's.
 
 For net uplift, the counterfactual adjustment is applied after prediction: a lot's predicted net uplift is its predicted gross uplift minus (`r round(g, 2) - 1`) times its own 2024 baseline value, the same adjustment used for the measured cohort.
 
@@ -1490,7 +1490,7 @@ That's not insignificant. The infill tax uplift would cover all of the following
 
 Add those up and it comes to $13.8M, just under the $14.0M a year in infill tax uplift.
 
-Alternatively, this infill tax uplift is equivalent to an approximate 0.6% reduction in the property tax rate, which would be a welcome relief for all property owners in Edmonton. As we build more small-scale infill in 2027 and beyond, the tax uplift will continue to grow, further decreasing property taxes for everyone. [Based on $11M for Explore Edmonton [worth 0.5% of property tax rate](https://edmontonjournal.com/news/local-news/explore-edmonton-celebrates-funding-as-city-vies-for-mystery-event)]{.aside}
+Alternatively, this infill tax uplift is equivalent to an approximate 0.6% reduction in the property tax rate, which would be a welcome relief for all property owners in Edmonton. [Based on $11M for Explore Edmonton [worth 0.5% of property tax rate](https://edmontonjournal.com/news/local-news/explore-edmonton-celebrates-funding-as-city-vies-for-mystery-event)]{.aside}
 
 ```{r}
 #| label: key-facts-validation
@@ -1498,16 +1498,14 @@ Alternatively, this infill tax uplift is equivalent to an approximate 0.6% reduc
 # Sanity check that the hardcoded Key facts bullets above still match the
 # computed figures, so a future re-render can't silently drift from them.
 stopifnot(
-  comprehensive_net_uplift > 1.5e9,
-  comprehensive_net_uplift < 1.9e9,
-  comprehensive_tax_uplift > 1.2e7,
-  comprehensive_tax_uplift < 1.5e7
+  round(comprehensive_net_uplift / 1e9, 2) == 1.73,
+  round(comprehensive_tax_uplift / 1e6) == 14
 )
 ```
 
 ## Conclusions
 
-The RS Zone's small-scale infill isn't just adding homes, it's increasing the size of the property tax base. A few hundred developments over the past two and a half years, built in mature areas that already have the pipes, roads, and schools in place, is already worth more than `r label_dollars_adaptive(comprehensive_tax_uplift)` a year in additional municipal property tax capacity at steady state. This corresponds to a 0.6% decrease in the property tax rate, which is a meaningful relief for all property owners in Edmonton. And more relief will be on the way as more gets built in 2027 and onwards.
+The RS Zone's small-scale infill isn't just adding homes, it's increasing the size of the property tax base. A few hundred developments over the past two and a half years, built in mature areas that already have the pipes, roads, and schools in place, are already worth more than `r label_dollars_adaptive(comprehensive_tax_uplift)` a year in additional municipal property tax capacity at steady state. This corresponds to a 0.6% decrease in the property tax rate, which is a meaningful relief for all property owners in Edmonton. And more relief will be on the way as more gets built in 2027 and onwards.
 
 Now it's up to Council to decide what to do with the ever-growing infill dividend.
 Whether it's used to keep property taxes lower or to increase service levels, the Zoning Bylaw Renewal will continue to pay off for all Edmontonians for years to come.
