@@ -17,21 +17,21 @@ When a single-detached home in a mature neighbourhood becomes a 5 to 8 unit rowh
 
 Using building permits from 2024, the first year the RS Zone was in force, matched against the City's property assessment data, I measure that uplift directly for completed projects in each category, then fit a single pooled regression model across all three to estimate what it adds up to across the full 2024-2026 pipeline. The 5 to 8 unit rowhome is the largest single category by far, so it gets the detailed worked example; the same method is then applied to the other two.
 
-## Key facts
+## Key numbers
 
--   Across all three of the RS Zone's small-scale infill types — 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes — mature-neighbourhood redevelopment since ZBR took effect will add an estimated **$1.8 billion** in net assessed property value at steady state, once every 2024-2026 project is complete and fully reflected in an assessment roll, generating on the order of **$14-15 million** a year in municipal property tax.
+-   **$1.73 billion**: The amount that small-scale infill — 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes — in the RS Zone from 2024-2026 will add to the property tax base at steady state.
 
--   The 5 to 8 unit rowhome is the dominant category on its own: roughly **800** permitted redevelopment projects account for an estimated **$1.3 billion** of that value and **$10-11 million** a year in tax. 2 to 4 unit plexes and backyard homes make up the rest, from a single pooled model fit across all three categories together.
+-   **$14 million per year**: The amount of incremental property tax that the City of Edmonton will collect from RS Zone small-scale infill at steady state.
 
--   Because most of the pipeline is still under construction or was only recently completed, the City has collected only about **$2 million** in additional property tax so far from the 5 to 8 unit rowhome cohort alone, across 2025 and 2026 combined — far below the eventual run rate.
-
--   No subsidy, grant, or City-led development produced this. Removing rules that made this kind of building illegal did.
-
-## Data
+## Data {#sec-data}
 
 This analysis combines three of Edmonton's Open Data sources. Edmonton's [general building permit data](https://data.edmonton.ca/Urban-Planning-Economy/General-Building-Permits/24uj-dj8v/about_data), the same source used in the [Q2 2026 building permit report](../q2-building-permits/index.qmd), identifies which properties were redeveloped into 5 to 8 unit rowhomes, 2 to 4 unit plexes, or backyard homes, and when. Edmonton's [current calendar year property assessment data](https://data.edmonton.ca/City-Administration/Property-Assessment-Data-Current-Calendar-Year-/q7d6-ambg/about_data) gives each property's assessed value as of 2026, and Edmonton's [historical property assessment data](https://data.edmonton.ca/City-Administration/Property-Assessment-Data-Historical-/qi6a-xuwt/about_data) gives assessed values back to 2012, including 2024 and 2025.
 
-A lot can carry more than one kind of permit — a fourplex redevelopment plus a backyard-suite permit on the same title, for instance — so each category is deduped against the more intensive ones already claimed, by legal-description lot key, meaning every lot is counted once, under its most intensive project.
+The unit of analysis throughout this post is the **lot**, not the permit — a redevelopment can take more than one permit, and a permit alone can double-count or miss a lot's true uplift. Three situations come up:
+
+1. **One permit on a lot.** The common case: match the permit to that lot's one pre- and post-redevelopment assessment.
+2. **More than one permit on the same lot.** A fourplex redevelopment plus a separate garden-suite permit on the same never-subdivided lot, for instance — sometimes issued a year or more apart. These are one redevelopment, not two, so I add the permits together: their units sum, and the one shared assessed value covers both (a garden suite is almost always assessed as part of its host property, not as a separate account). Categorizing by the combined unit count, not any single permit's own count, means a fourplex-plus-suite lot with 6 total homes counts as part of the 5 to 8 unit rowhome story, not the 2 to 4 unit plex one.
+3. **A lot split into two or more child lots, each separately permitted** — a duplex-style subdivision under a brand-new plan, for instance. Each child gets its own completed-building assessment, but only one of them, if any, can be traced back to the original, pre-split lot's baseline value. I assign an equal share of that original value to each child as its baseline.
 
 ```{r}
 #| label: setup
@@ -53,7 +53,7 @@ options(
 
 label_dollars_adaptive <- function(x) {
   if (abs(x) >= 1e9) {
-    label_dollar(scale = 1e-9, suffix = "B", accuracy = 0.1)(x)
+    label_dollar(scale = 1e-9, suffix = "B", accuracy = 0.01)(x)
   } else if (abs(x) >= 1e8) {
     label_dollar(scale = 1e-6, suffix = "M", accuracy = 1)(x)
   } else {
@@ -61,26 +61,60 @@ label_dollars_adaptive <- function(x) {
   }
 }
 
-# Parses a permit's legal description into a (plan, block, lot) key, used
-# both to match permits to assessments (@sec below) and, here, to dedupe a
-# lot across the three small-scale-infill pipelines (a lot with a fourplex
-# and a backyard-suite permit should count once, under its most intensive
-# project).
+# Parses a permit's legal description into a (plan, block, lot) key, used to
+# match permits to assessments (@sec-matching below).
 parse_permit_legal <- function(x) {
   m <- str_match(x, "Plan\\s+(\\S+)\\s+Blk\\s+(\\S+)\\s+Lots?\\s+(\\S+)")
   tibble(plan = m[, 2], block = m[, 3], lot = m[, 4])
 }
 normalize_key <- function(plan, block, lot) {
-  paste(
-    toupper(str_trim(plan)),
-    toupper(str_trim(block)),
-    toupper(str_trim(lot)),
-    sep = "|"
+  # A missing component must yield a real NA, not the literal string "NA|NA|NA":
+  # otherwise every parcel with an incomplete legal description (e.g. a
+  # letter-lot "Plan X Lot H" with no block) collapses onto one shared key and
+  # gets falsely matched to a single arbitrary assessment row.
+  if_else(
+    is.na(plan) | is.na(block) | is.na(lot),
+    NA_character_,
+    paste(
+      toupper(str_trim(plan)),
+      toupper(str_trim(block)),
+      toupper(str_trim(lot)),
+      sep = "|"
+    )
   )
 }
-permit_lot_key <- function(legal_description) {
+
+# Strips the trailing letter off a legal-description lot number (e.g. "40A"
+# -> "40"), grouping the two (or more) child lots a parcel was subdivided
+# into under one new plan. Used to share one pre-subdivision baseline across
+# a lot's children (@sec-consolidating, situation 3). Legal descriptions
+# that don't match the "Plan X Blk Y Lot Z" format at all (e.g. "Condo
+# Common Area (Plan X)") fall back to the raw string as their own key, so
+# every one of them is its own singleton family -- otherwise they'd all
+# collapse onto the same "NA|NA|NA" key and get treated as siblings of each
+# other, sharing a nonsense baseline across completely unrelated lots.
+parent_lot_key <- function(legal_description) {
   parsed <- parse_permit_legal(legal_description)
-  normalize_key(parsed$plan, parsed$block, parsed$lot)
+  lot_numeric <- str_extract(parsed$lot, "^[0-9]+")
+  key <- normalize_key(parsed$plan, parsed$block, lot_numeric)
+  if_else(
+    is.na(parsed$plan) | is.na(parsed$block) | is.na(lot_numeric),
+    legal_description,
+    key
+  )
+}
+
+# Parses a permit's civic address into a (house_number, street_name) key,
+# used as a fallback (@sec-matching) for permits with no geometry and a
+# legal description on a subdivision plan too new to appear in either
+# assessment roll. Strips an optional leading "UNIT, "/"BSMT, " prefix and
+# any letter suffix on the house number itself (e.g. the "G" that marks a
+# garden-suite building at an existing address), since both assessment
+# rolls' house_number field is purely numeric.
+parse_permit_address <- function(x) {
+  x_no_unit <- str_replace(x, "^[^,]+,\\s*", "")
+  m <- str_match(x_no_unit, "^(\\d+)[A-Za-z]?\\s*-\\s*(.+)$")
+  tibble(house_number = m[, 2], street_name = toupper(str_trim(m[, 3])))
 }
 
 # The 2026 assessment only reliably reflects buildings finished by about
@@ -103,7 +137,20 @@ bp <- bp_raw |>
   add_edmonton_project_type() |>
   add_edmonton_suite_info() |>
   add_edmonton_neighbourhood_type() |>
-  mutate(lot_key = permit_lot_key(legal_description))
+  # Some permits carry an occupancy_granted_date that predates their own
+  # issue date -- a known data error (e.g. a 2024 new-build stamped with a
+  # 2022/2023 occupancy). Blank those dates so the bad date can't put a lot
+  # into the measured cohort's occupancy cutoff. The lot itself is not
+  # dropped: with no trustworthy completion date it simply falls to the
+  # model-predicted side of the pipeline (all_sites_pred doesn't filter on
+  # occupancy), so it's still counted in the steady-state uplift.
+  mutate(
+    occupancy_granted_date = if_else(
+      !is.na(date_issued) & occupancy_granted_date < date_issued,
+      as.Date(NA),
+      occupancy_granted_date
+    )
+  )
 
 # LRT stops (existing + under construction), same setup as the Q2 2026 report
 future_stops <- read_sf("../../../data/future_lrt_stops.geojson") |>
@@ -124,49 +171,20 @@ transit_stops <- load_edmonton_transit_stops(
   crs = crs
 )
 
-# The pipeline this whole post is about: mature-neighbourhood RS Zone
-# 5-8 unit new-builds, permitted since ZBR took effect. Each permit gets
-# its distance to the nearest LRT stop, used by the uplift model later.
-rowhome_pipeline <- bp |>
+# The full universe this post is about: every mature-neighbourhood RS Zone
+# permit that could be part of a 5-8 unit rowhome, 2-4 unit plex, or
+# backyard-home redevelopment, permitted since ZBR took effect. Categories
+# aren't assigned here -- that only happens once same-lot permits are
+# consolidated (@sec-consolidating), since a permit's own unit count can be
+# misleading (a lot's *combined* units are what matters).
+redevelopment_permits <- bp |>
   filter(
-    zoning == "RS",
-    between(units_added, 5, 8),
-    work_type == "(01) Building - New",
-    neighbourhood_type == "Mature"
-  ) |>
-  add_transit_distance(transit_stops)
-
-# Two more small-scale-infill pipelines, on the same mature-RS footing as the
-# rowhome pipeline above. A lot can carry more than one permit type (e.g. a
-# fourplex redevelopment plus a backyard-suite permit on the same title), so
-# each is deduped against the more intensive categories already claimed, by
-# lot key, so every lot is counted once, under its most intensive project.
-plex_pipeline <- bp |>
-  filter(
-    zoning == "RS",
-    between(units_added, 2, 4),
-    work_type == "(01) Building - New",
-    neighbourhood_type == "Mature",
-    !lot_key %in% rowhome_pipeline$lot_key
-  ) |>
-  add_transit_distance(transit_stops)
-
-backyard_pipeline <- bp |>
-  filter(
-    project_type == "Backyard House",
     zoning == "RS",
     work_type == "(01) Building - New",
     neighbourhood_type == "Mature",
-    !lot_key %in% rowhome_pipeline$lot_key,
-    !lot_key %in% plex_pipeline$lot_key
+    between(units_added, 2, 8) | project_type == "Backyard House"
   ) |>
   add_transit_distance(transit_stops)
-
-stopifnot(
-  length(intersect(rowhome_pipeline$lot_key, plex_pipeline$lot_key)) == 0,
-  length(intersect(rowhome_pipeline$lot_key, backyard_pipeline$lot_key)) == 0,
-  length(intersect(plex_pipeline$lot_key, backyard_pipeline$lot_key)) == 0
-)
 ```
 
 ```{r}
@@ -184,14 +202,23 @@ fetch_socrata_csv <- function(resource, query, cache_file) {
       ".csv?",
       URLencode(query)
     )
-    download.file(url, path, mode = "wb")
+    # These pulls are hundreds of MB; the default 60s timeout is far too
+    # short. Download to a temp file and only promote it to the cache path
+    # on success, so an interrupted download can't leave a truncated file
+    # that later runs would silently reuse.
+    old_timeout <- getOption("timeout")
+    options(timeout = max(1800, old_timeout))
+    on.exit(options(timeout = old_timeout), add = TRUE)
+    tmp <- paste0(path, ".part")
+    download.file(url, tmp, mode = "wb")
+    file.rename(tmp, path)
   }
   read_csv(path, show_col_types = FALSE, col_types = cols(.default = "c"))
 }
 
 assessment_hist <- fetch_socrata_csv(
   "qi6a-xuwt",
-  "$where=assessment_year in (2023,2024,2025)&$limit=1000000",
+  "$where=assessment_year in (2023,2024,2025)&$limit=2000000",
   "assessment_2023_2025.csv"
 ) |>
   mutate(
@@ -235,34 +262,13 @@ municipal_rate <- function(class, yr) {
 }
 ```
 
-## Measuring the uplift: the 2024 cohort
+## Matching permits to assessments and consolidating lots {#sec-matching}
 
-I measure completed 2024 projects in all three categories — 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes — against the same matching, assessment-lag, and counterfactual-growth machinery. The 5 to 8 unit rowhome is by far the largest category, so I walk through that machinery in detail on its cohort first, then apply the same method to the other two.
+The key challenge is linking a specific building permit to the same physical property, before and after redevelopment.
 
-### Worked example: the 5 to 8 unit rowhome cohort
+### Matching a permit to its assessment record
 
-The 2026 property assessment is supposed to reflect each property's physical condition as of December 31, 2025. In principle, that means any 2024 permit whose building had received occupancy by the end of 2025 should be assessed as completed in the 2026 assessment roll. In practice, the assessments lag, as @sec-assessment-catch-up checks directly.
-
-```{r}
-#| label: measurement-cohort
-cohort_2024 <- rowhome_pipeline |>
-  filter(year == 2024)
-
-n_cohort_2024_all <- nrow(cohort_2024)
-n_occupancy_by_dec <- cohort_2024 |>
-  st_drop_geometry() |>
-  filter(
-    !is.na(occupancy_granted_date),
-    occupancy_granted_date <= as.Date("2025-12-31")
-  ) |>
-  nrow()
-```
-
-Edmonton issued **`r n_cohort_2024_all`** mature-neighbourhood RS Zone 5-8 unit new-build permits in 2024, of which **`r n_occupancy_by_dec`** had received occupancy by the end of 2025. I match all `r n_cohort_2024_all` to their assessment records, then use the occupancy dates to decide which ones the 2026 assessment actually reflects as complete.
-
-#### Matching permits to assessments
-
-The key challenge is linking a specific building permit to the same physical property, before and after redevelopment. Account numbers usually persist through redevelopment, but addresses often don't: a lot can get re-addressed when it's rebuilt, so a permit's civic address is frequently not the address that appears in the property's earlier assessment record. Instead, I match on legal description (plan/block/lot), which is stable across redevelopment, with a fallback to geographic proximity for the small number of properties where the legal description format doesn't parse identically on both sides, or where redevelopment came with a brand new account number.
+Account numbers usually persist through redevelopment, but addresses often don't. Legal description (plan/block/lot), seems to be more stable across redevelopment. However, I have two fallbacks for the properties that don't match that way.
 
 I parse each side's legal description into a `(plan, block, lot)` key and join on it. A building permit's legal description looks like `Plan 715HW Blk 25 Lot 22`; the historical assessment data records the same parcel as `Plan: 715HW  Block: 25  Lot: 22`.
 
@@ -279,9 +285,9 @@ assessment_2024_keyed <- assessment_2024 |>
   filter(!is.na(key)) |>
   distinct(key, .keep_all = TRUE)
 
-# Reusable matcher: join a cohort of permits to their 2024 baseline assessed
-# value by legal-description key. Used for the 2024 cohort here, and again
-# later for the 2025/2026 permits when estimating net uplift.
+# Reusable matcher: join a set of permits to their 2024 baseline assessed
+# value by legal-description key. Used for the full permit universe here,
+# and again later for the model's own baseline lookups.
 match_baseline_2024 <- function(cohort_sf) {
   cohort_sf |>
     st_drop_geometry() |>
@@ -294,11 +300,11 @@ match_baseline_2024 <- function(cohort_sf) {
     )
 }
 
-cohort_matched <- match_baseline_2024(cohort_2024)
-n_matched_legal <- sum(!is.na(cohort_matched$account_number))
+baseline_matched <- match_baseline_2024(redevelopment_permits)
+n_matched_legal <- sum(!is.na(baseline_matched$account_number))
 ```
 
-That legal-key match links most properties to their 2024 baseline assessed value directly. I close the gap two ways: a 25m geographic fallback for lots consolidated from two legal titles into one, and hand-matching for the handful of re-platted lots that geography can't reach either.
+That legal-key match links most properties to their 2024 baseline assessed value directly. The first fallback is geographic: the nearest 2024 assessment point within 25m, for lots consolidated from two legal titles into one, or where the legal description format doesn't parse identically on both sides.
 
 ```{r}
 #| label: geo-fallback-2024
@@ -341,89 +347,95 @@ geo_fallback_baseline <- function(matched_df, cohort_sf) {
     select(-any_of(c("geo_account", "geo_value_2024", "geo_dist_m")))
 }
 
-cohort_matched <- geo_fallback_baseline(cohort_matched, cohort_2024)
-
-n_matched_after_geo <- sum(!is.na(cohort_matched$account_number))
-n_still_dropped <- n_cohort_2024_all - n_matched_after_geo
+baseline_matched <- geo_fallback_baseline(
+  baseline_matched,
+  redevelopment_permits
+)
+n_matched_after_geo <- sum(!is.na(baseline_matched$account_number))
 ```
 
-The 25m fallback closes most of the remaining gap — in each case to the exact same civic address as the permit, at a matched distance of a few millimetres. The last `r n_still_dropped` properties carry a legal description reissued under a brand-new subdivision plan and have no permit coordinates, so neither match reaches them. I hand-matched these by tracing each address through the historical assessment data; two had no 2024 assessment under either their old or new legal description, so I escalate their last observed 2023 value to a 2024 basis using the same median growth-ratio approach used elsewhere in this post. [I am not sure why I cannot find these two properties in the 2024 assessment roll. If you have any ideas, let me know. The addresses are 13009 - 109A AVENUE NW and 1, 11630 - 122 STREET NW]{.aside}
+The 25m fallback closes most of the remaining gap. What's left mostly carries a legal description reissued under a brand-new subdivision plan, with no permit coordinates for the 25m fallback to use either.
+
+The civic address usually still resolves even when the legal description doesn't: Edmonton's assessment rolls index every parcel by house number and street name independently of its legal description.
 
 ```{r}
-#| label: manual-matches
-# Three 2024 new-build permits carry re-platted (post-subdivision) legal
-# descriptions and no permit coordinates, so neither the legal-key match nor
-# the 25m geo-fallback finds them. Hand-matched by tracing each address's
-# assessment history: two properties were demolished before the 2024 roll's
-# snapshot date and only have a 2023 assessed value, escalated to a 2024
-# basis by the median 2023->2024 growth ratio among parcels present in both
-# rolls (same idiom as the 2024->2026 counterfactual growth ratio used later
-# in this post). Zoning isn't used to restrict this comparison: 2023 predates
-# ZBR, so its zoning codes are the pre-ZBR system (e.g. RF1, RF3) rather than
-# "RS", and the account_number join already restricts to persisting parcels.
-g23 <- assessment_2023 |>
-  inner_join(
-    assessment_2024 |> select(account_number, v24 = assessed_value),
-    by = "account_number"
-  ) |>
-  mutate(ratio = v24 / assessed_value) |>
-  filter(assessed_value > 10000, ratio > 0.5, ratio < 3) |>
-  summarise(g = median(ratio, na.rm = TRUE)) |>
-  pull(g)
+#| label: address-fallback-baseline
+# Third-tier fallback: for permits with no geometry (so the 25m fallback
+# above has nothing to search from) whose legal description is on a
+# subdivision plan too new for the 2024 roll, the civic address usually
+# still resolves. Restricted to non-suite assessment rows, since a
+# condo/suite shares its civic address with many unrelated units at very
+# different values.
+address_fallback_baseline <- function(matched_df, cohort_sf) {
+  still_unmatched <- matched_df |> filter(is.na(account_number))
+  if (nrow(still_unmatched) == 0) {
+    return(matched_df)
+  }
 
-lookup_hist_value <- function(acct, yr) {
-  assessment_hist |>
-    filter(account_number == acct, assessment_year == yr) |>
-    pull(assessed_value)
+  addr_cohort <- cohort_sf |>
+    st_drop_geometry() |>
+    filter(permit_row_id %in% still_unmatched$permit_row_id) |>
+    select(permit_row_id, address)
+  addr_parsed <- addr_cohort |>
+    bind_cols(parse_permit_address(addr_cohort$address)) |>
+    mutate(house_number = as.character(as.numeric(house_number)))
+
+  assessment_2024_addr <- assessment_2024 |>
+    filter(is.na(suite)) |>
+    mutate(
+      house_number = as.character(as.numeric(house_number)),
+      street_name = toupper(str_trim(street_name))
+    ) |>
+    distinct(house_number, street_name, .keep_all = TRUE)
+
+  addr_matches <- addr_parsed |>
+    left_join(
+      assessment_2024_addr |>
+        select(
+          house_number,
+          street_name,
+          addr_account = account_number,
+          addr_value_2024 = assessed_value
+        ),
+      by = c("house_number", "street_name")
+    ) |>
+    filter(!is.na(addr_account)) |>
+    select(permit_row_id, addr_account, addr_value_2024)
+
+  matched_df |>
+    left_join(addr_matches, by = "permit_row_id") |>
+    mutate(
+      account_number = coalesce(account_number, addr_account),
+      value_2024 = coalesce(value_2024, addr_value_2024)
+    ) |>
+    select(-any_of(c("addr_account", "addr_value_2024")))
 }
 
-manual_matches <- tribble(
-  ~legal_description           , ~baseline_account , ~baseline_year , ~outcome_account ,
-  "Plan 2420304 Blk 1 Lot 10C" , "2696003"         , 2023L          , "11222239"       ,
-  "Plan 2421625 Blk 8 Lot 4A"  , "2122703"         , 2024L          , "11311520"       ,
-  "Plan 2421483 Blk 35 Lot 8C" , "2775609"         , 2023L          , "11229512"
-) |>
-  rowwise() |>
-  mutate(baseline_raw = lookup_hist_value(baseline_account, baseline_year)) |>
-  ungroup() |>
-  mutate(
-    value_2024_manual = if_else(
-      baseline_year == 2023L,
-      baseline_raw * g23,
-      baseline_raw
-    )
-  )
-
-cohort_matched <- cohort_matched |>
-  left_join(
-    manual_matches |>
-      select(
-        legal_description,
-        manual_account = outcome_account,
-        manual_value_2024 = value_2024_manual
-      ),
-    by = "legal_description"
-  ) |>
-  mutate(
-    account_number = coalesce(account_number, manual_account),
-    value_2024 = coalesce(value_2024, manual_value_2024)
-  ) |>
-  select(-manual_account, -manual_value_2024)
-
-n_matched_total <- sum(!is.na(cohort_matched$account_number))
-n_dropped <- n_cohort_2024_all - n_matched_total
+baseline_matched <- address_fallback_baseline(
+  baseline_matched,
+  redevelopment_permits
+)
+n_matched_baseline <- sum(!is.na(baseline_matched$account_number))
+n_total_permits <- nrow(baseline_matched)
 ```
 
-Combining the geo-fallback with these three hand-matched properties links all **`r n_matched_total`** of `r n_cohort_2024_all` permits (`r percent(n_matched_total / n_cohort_2024_all, accuracy = 1)`) to a 2024 baseline assessed value. In most cases the account number persists through redevelopment, so I use it to look up the completed building's 2026 assessed value, again with a geographic fallback for the small number of properties issued a brand new account number when redeveloped.
+Combining all three tiers links **`r n_matched_baseline`** of `r n_total_permits` permits (`r percent(n_matched_baseline / n_total_permits, accuracy = 1)`) to a 2024 baseline assessed value directly. Some of the rest still turn out to have a baseline after all: @sec-consolidating covers how.
+
+In most cases the account number persists through redevelopment, so I use it to look up the completed building's 2026 assessed value, with the same two fallbacks (25m geographic proximity, then civic address) for the properties issued a brand new account number when redeveloped.
 
 ```{r}
-#| label: join-2026-and-2025
-# Reusable: join a baseline-matched cohort to its 2026 outcome value by
-# account_number, falling back to the nearest 2026 assessment point within
-# 25m for the rare case where redevelopment came with a new account number.
+#| label: join-2026
+# Reusable: join a baseline-matched permit to its 2026 outcome value by
+# account_number, falling back to (1) the nearest 2026 assessment point
+# within 25m, then (2) the permit's own post-redevelopment civic address,
+# for the permits geometry can't reach. Unlike the baseline matcher, this
+# must NOT require account_number up front: a permit can lack any 2024
+# baseline (its lot was split into a brand-new address with no
+# pre-existing account) yet still have a perfectly good completed 2026
+# value once its own address resolves -- so every permit stays in play
+# here, whether or not the baseline matchers above found it anything.
 match_outcome_2026 <- function(matched_df, cohort_sf) {
   joined <- matched_df |>
-    filter(!is.na(account_number)) |>
     left_join(
       assessment_2026 |>
         select(account_number, value_2026 = assessed_value, mill_class_1),
@@ -431,64 +443,289 @@ match_outcome_2026 <- function(matched_df, cohort_sf) {
     )
 
   missing_2026 <- joined |> filter(is.na(value_2026))
-  if (nrow(missing_2026) == 0) {
+  if (nrow(missing_2026) > 0) {
+    missing_2026_sf <- cohort_sf |>
+      filter(permit_row_id %in% missing_2026$permit_row_id)
+    assessment_2026_sf <- assessment_2026 |>
+      filter(!is.na(latitude), !is.na(longitude)) |>
+      st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
+      st_transform(crs)
+
+    nearest_idx <- st_nearest_feature(missing_2026_sf, assessment_2026_sf)
+    geo_2026 <- tibble(
+      permit_row_id = missing_2026_sf$permit_row_id,
+      geo_value_2026 = assessment_2026_sf$assessed_value[nearest_idx],
+      geo_mill_class = assessment_2026_sf$mill_class_1[nearest_idx],
+      geo_dist_m = as.numeric(st_distance(
+        missing_2026_sf,
+        assessment_2026_sf[nearest_idx, ],
+        by_element = TRUE
+      ))
+    ) |>
+      filter(geo_dist_m <= 25)
+
+    joined <- joined |>
+      left_join(geo_2026, by = "permit_row_id") |>
+      mutate(
+        value_2026 = coalesce(value_2026, geo_value_2026),
+        mill_class_1 = coalesce(mill_class_1, geo_mill_class)
+      ) |>
+      select(-any_of(c("geo_value_2026", "geo_mill_class", "geo_dist_m")))
+  }
+
+  still_missing_2026 <- joined |> filter(is.na(value_2026))
+  if (nrow(still_missing_2026) == 0) {
     return(joined)
   }
 
-  missing_2026_sf <- cohort_sf |>
-    filter(permit_row_id %in% missing_2026$permit_row_id)
-  assessment_2026_sf <- assessment_2026 |>
-    filter(!is.na(latitude), !is.na(longitude)) |>
-    st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
-    st_transform(crs)
+  addr_cohort <- cohort_sf |>
+    st_drop_geometry() |>
+    filter(permit_row_id %in% still_missing_2026$permit_row_id) |>
+    select(permit_row_id, address)
+  addr_parsed <- addr_cohort |>
+    bind_cols(parse_permit_address(addr_cohort$address)) |>
+    mutate(house_number = as.character(as.numeric(house_number)))
 
-  nearest_idx <- st_nearest_feature(missing_2026_sf, assessment_2026_sf)
-  geo_2026 <- tibble(
-    permit_row_id = missing_2026_sf$permit_row_id,
-    geo_value_2026 = assessment_2026_sf$assessed_value[nearest_idx],
-    geo_mill_class = assessment_2026_sf$mill_class_1[nearest_idx],
-    geo_dist_m = as.numeric(st_distance(
-      missing_2026_sf,
-      assessment_2026_sf[nearest_idx, ],
-      by_element = TRUE
-    ))
-  ) |>
-    filter(geo_dist_m <= 25)
+  assessment_2026_addr <- assessment_2026 |>
+    filter(is.na(suite)) |>
+    mutate(
+      house_number = as.character(as.numeric(house_number)),
+      street_name = toupper(str_trim(street_name))
+    ) |>
+    distinct(house_number, street_name, .keep_all = TRUE)
+
+  addr_matches_2026 <- addr_parsed |>
+    left_join(
+      assessment_2026_addr |>
+        select(
+          house_number,
+          street_name,
+          addr_value_2026 = assessed_value,
+          addr_mill_class = mill_class_1
+        ),
+      by = c("house_number", "street_name")
+    ) |>
+    filter(!is.na(addr_value_2026)) |>
+    select(permit_row_id, addr_value_2026, addr_mill_class)
 
   joined |>
-    left_join(geo_2026, by = "permit_row_id") |>
+    left_join(addr_matches_2026, by = "permit_row_id") |>
     mutate(
-      value_2026 = coalesce(value_2026, geo_value_2026),
-      mill_class_1 = coalesce(mill_class_1, geo_mill_class)
+      value_2026 = coalesce(value_2026, addr_value_2026),
+      mill_class_1 = coalesce(mill_class_1, addr_mill_class)
     ) |>
-    select(-any_of(c("geo_value_2026", "geo_mill_class", "geo_dist_m")))
+    select(-any_of(c("addr_value_2026", "addr_mill_class")))
 }
 
-# 2025 (mid-construction) value, used later for the partial-uplift estimate
-matched_2024_all <- match_outcome_2026(cohort_matched, cohort_2024) |>
+matched_outcome <- match_outcome_2026(baseline_matched, redevelopment_permits)
+n_matched_outcome <- sum(!is.na(matched_outcome$value_2026))
+```
+
+That gives **`r n_matched_outcome`** of `r n_total_permits` permits (`r percent(n_matched_outcome / n_total_permits, accuracy = 1)`) a completed 2026 assessed value, whether or not that same permit matched a 2024 baseline directly.
+
+### Consolidating same-lot permits and lot splits {#sec-consolidating}
+
+Every permit above is matched on its own, but the unit of analysis is the lot. I now collapse same-lot permits together (situation 2 from the @sec-data) and share a baseline across split lots (situation 3), across the whole 2024-2026 timeframe. For example, a fourplex permitted in 2024 and its garden suite permitted in 2025 are still one lot. Treating them as two separate, single-year events would let the same original assessed value get counted twice.
+
+```{r}
+#| label: build-sites
+first_non_na <- function(x) {
+  v <- x[!is.na(x)]
+  if (length(v) == 0) {
+    return(x[1])
+  }
+  v[1]
+}
+
+# A lot's completed value can come from more than one permit's own matched
+# account (e.g. a fourplex and its later garden suite occasionally resolve
+# to two different final accounts). Summing over *distinct* (value,
+# assessment class) pairs, rather than over every constituent permit,
+# correctly handles both a lot that resolves to one shared account (the
+# distinct set has one member, so nothing is double-counted) and a lot
+# whose permits genuinely each earned their own separate completed value.
+sum_distinct_value_2026 <- function(value_2026, mill_class_1) {
+  d <- tibble(value_2026 = value_2026, mill_class_1 = mill_class_1) |>
+    filter(!is.na(value_2026)) |>
+    distinct()
+  if (nrow(d) == 0) {
+    return(NA_real_)
+  }
+  sum(d$value_2026)
+}
+
+# Situations 1 & 2: collapse every permit sharing an exact legal
+# description -- regardless of permit year -- into one row per lot.
+# units_added sums (each permit represents real added units);
+# occupancy_granted_date takes the latest (the lot isn't "done" until its
+# last permit is); the "primary" permit -- the one with the most units, a
+# lot's main redevelopment rather than an added suite -- supplies the
+# site's year, address, neighbourhood, and transit distance.
+build_sites <- function(matched) {
+  m <- matched |> st_drop_geometry()
+
+  primary <- m |>
+    arrange(legal_description, desc(units_added), year) |>
+    distinct(legal_description, .keep_all = TRUE) |>
+    select(legal_description, year, address, neighbourhood, distance_from_lrt)
+
+  totals <- m |>
+    group_by(legal_description) |>
+    summarise(
+      units_added = sum(units_added),
+      occupancy_granted_date = if (all(is.na(occupancy_granted_date))) {
+        as.Date(NA)
+      } else {
+        max(occupancy_granted_date, na.rm = TRUE)
+      },
+      account_number = first_non_na(account_number),
+      value_2024 = first_non_na(value_2024),
+      value_2026 = sum_distinct_value_2026(value_2026, mill_class_1),
+      mill_class_1 = first_non_na(mill_class_1),
+      all_backyard = all(project_type == "Backyard House"),
+      .groups = "drop"
+    )
+
+  primary |> left_join(totals, by = "legal_description")
+}
+
+# Situation 3: share one baseline across a split lot's children. A family
+# (same plan/block, lot letter stripped) only gets its baseline shared if
+# exactly one distinct baseline value is found anywhere among its children
+# -- that's the signature of a lot that split after the 2024 snapshot, with
+# only one child (or none) resolving the original parcel's value directly.
+# A family where two children already carry two genuinely different
+# baseline values is left alone: that's an old, already-separate pair of
+# lots that happen to share a lot-letter naming pattern, not a recent
+# split, and sharing would silently discard one of their real baselines.
+share_split_baselines <- function(sites) {
+  keyed <- sites |> mutate(parent_key = parent_lot_key(legal_description))
+
+  family_baseline <- keyed |>
+    filter(!is.na(value_2024)) |>
+    distinct(parent_key, value_2024) |>
+    add_count(parent_key, name = "n_distinct_baselines") |>
+    filter(n_distinct_baselines == 1) |>
+    select(parent_key, family_value_2024 = value_2024)
+
+  family_size <- keyed |> count(parent_key, name = "n_children")
+
+  keyed |>
+    left_join(family_baseline, by = "parent_key") |>
+    left_join(family_size, by = "parent_key") |>
+    mutate(
+      shared_baseline = !is.na(family_value_2024) & n_children > 1,
+      value_2024 = if_else(
+        shared_baseline,
+        family_value_2024 / n_children,
+        value_2024
+      )
+    ) |>
+    select(-family_value_2024, -n_children, -parent_key)
+}
+
+sites <- build_sites(matched_outcome) |>
+  share_split_baselines() |>
+  mutate(
+    category = case_when(
+      all_backyard ~ "backyard",
+      units_added <= 4 ~ "plex",
+      TRUE ~ "rowhome"
+    ),
+    # A site with no geometry (the same missing-coordinates problem the
+    # address fallback above works around) has no LRT distance either.
+    # Falling back to the citywide median here, once, means every
+    # downstream consumer of `sites` already has a usable covariate rather
+    # than needing its own fallback.
+    distance_from_lrt = coalesce(
+      distance_from_lrt,
+      median(distance_from_lrt, na.rm = TRUE)
+    )
+  )
+
+n_sites <- nrow(sites)
+n_sites_matched <- sum(!is.na(sites$value_2024) & !is.na(sites$value_2026))
+n_shared_baseline <- sum(sites$shared_baseline)
+
+stopifnot(
+  # Every site is a distinct lot by construction.
+  n_distinct(sites$legal_description) == n_sites,
+  # Consolidating and sharing baselines moves value around but never
+  # drops or duplicates a permit's units.
+  sum(sites$units_added) == sum(matched_outcome$units_added)
+)
+```
+
+Consolidating collapses `r n_total_permits` permits into **`r n_sites`** distinct lots. Sharing a baseline across split lots (situation 3) resolves `r n_shared_baseline` of them that the permit-level matchers above couldn't reach on their own. Altogether, **`r n_sites_matched`** lots (`r percent(n_sites_matched / n_sites, accuracy = 1)`) end up with both a 2024 baseline and a 2026 completed value.
+
+```{r}
+#| label: category-match-rates
+category_match_rates <- sites |>
+  group_by(category) |>
+  summarise(
+    n = n(),
+    n_matched = sum(!is.na(value_2024) & !is.na(value_2026)),
+    .groups = "drop"
+  ) |>
+  mutate(pct = percent(n_matched / n, accuracy = 1))
+
+rowhome_match_rate <- category_match_rates |>
+  filter(category == "rowhome") |>
+  pull(pct)
+plex_match_rate <- category_match_rates |>
+  filter(category == "plex") |>
+  pull(pct)
+backyard_match_rate <- category_match_rates |>
+  filter(category == "backyard") |>
+  pull(pct)
+```
+
+The match rate holds up close to evenly across all three categories: `r rowhome_match_rate` of 5 to 8 unit rowhome lots, `r plex_match_rate` of 2 to 4 unit plex lots, and `r backyard_match_rate` of backyard-home lots resolve both a baseline and a completed value. Plexes are the category most likely to involve a lot split (a duplex-style subdivision into two semi-detached halves is a common way to build one), which is exactly the situation the split-baseline sharing above is for.
+
+## Measuring the uplift: the 2024 cohort
+
+I measure completed 2024 lots in all three categories — 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes — against the same assessment-lag and counterfactual-growth machinery. The 5 to 8 unit rowhome is by far the largest category, so I walk through that category first as an example, then apply the same method to the other two.
+
+### Worked example: the 5 to 8 unit rowhome cohort
+
+The 2026 property assessment is supposed to reflect each property's physical condition as of December 31, 2025. In principle, that means any 2024-permitted lot whose building had received occupancy by the end of 2025 should be assessed as completed in the 2026 assessment roll. In practice, the assessments lag, as @sec-assessment-catch-up checks directly.
+
+```{r}
+#| label: measurement-cohort
+rowhome_2024 <- sites |>
+  filter(category == "rowhome", year == 2024)
+
+n_cohort_2024_all <- nrow(rowhome_2024)
+n_occupancy_by_dec <- rowhome_2024 |>
+  filter(
+    !is.na(occupancy_granted_date),
+    occupancy_granted_date <= as.Date("2025-12-31")
+  ) |>
+  nrow()
+
+rowhome_2024_matched <- rowhome_2024 |>
+  filter(!is.na(value_2024), !is.na(value_2026)) |>
   left_join(
     assessment_2025 |> select(account_number, value_2025 = assessed_value),
     by = "account_number"
   ) |>
-  filter(!is.na(value_2026)) |>
   mutate(
-    bucket = if_else(units_added <= 6, "5-6 units", "7-8 units"),
+    bucket = if_else(units_added <= 6, "5-6 units", "7+ units"),
     gross_uplift = value_2026 - value_2024
   )
-
-n_matched_2024_all <- nrow(matched_2024_all)
+n_rowhome_2024_matched <- nrow(rowhome_2024_matched)
 ```
 
-That yields **`r n_matched_2024_all`** 2024 permits with both a 2024 baseline and a 2026 assessed value.
+Edmonton issued **`r n_cohort_2024_all`** mature-neighbourhood RS Zone 5-8 unit new-build lots in 2024, of which **`r n_occupancy_by_dec`** had received occupancy by the end of 2025. **`r n_rowhome_2024_matched`** of the `r n_cohort_2024_all` (`r percent(n_rowhome_2024_matched / n_cohort_2024_all, accuracy = 1)`) match both a 2024 baseline and a 2026 assessed value; I use the occupancy dates to decide which of those the 2026 assessment actually reflects as complete.
 
 #### When does the assessment catch up? {#sec-assessment-catch-up}
 
-Before treating every occupancy-granted building as "complete" in the 2026 data, it's worth checking whether the assessments actually keep up with late-year completions. @fig-assessment-lag plots each matched property's gross uplift against its occupancy date. Buildings that received occupancy by roughly the end of September 2025 show the full 5 to 8 unit rowhome uplift. For many October, November, and especially December completions, the uplift is much smaller and doesn't follow the same pattern — probably because their assessments still reflect an unfinished state.
+Before treating every occupancy-granted building as "complete" in the 2026 data, it's worth checking whether the assessments actually keep up with late-year completions. @fig-assessment-lag plots each matched lot's gross uplift against its occupancy date. Buildings that received occupancy by roughly the end of September 2025 tend to show the full 5 to 8 unit rowhome uplift. For many October, November, and especially December completions, the uplift is much smaller and doesn't follow the same pattern — probably because their assessments still reflect an unfinished state.
 
 ```{r}
 #| label: fig-assessment-lag
 #| fig-cap: "5 to 8 unit rowhomes: gross assessed value uplift by occupancy date, showing the 2026 assessment only reliably reflects buildings finished by about September 2025"
-matched_2024_all |>
+rowhome_2024_matched |>
   filter(
     !is.na(occupancy_granted_date),
     occupancy_granted_date <= as.Date("2025-12-31")
@@ -519,7 +756,7 @@ matched_2024_all |>
   ) +
   labs(
     title = "Assessment lag: 5 to 8 unit rowhome uplift by occupancy date",
-    subtitle = "2024 permits with occupancy granted by Dec 31, 2025; dashed line = Sept 30, 2025",
+    subtitle = "2024 lots with occupancy granted by Dec 31, 2025; dashed line = Sept 30, 2025",
     x = "Occupancy granted",
     y = "Gross assessed value uplift",
     colour = NULL,
@@ -528,65 +765,28 @@ matched_2024_all |>
   theme_jd(mode = "light")
 ```
 
-The measurement cohort for this post is the matched 2024 permits with occupancy granted by September 30, 2025. Everything else, including those October-December completions, goes into the "not yet fully reflected" group.
+The measurement cohort for this post is the matched 2024 lots with occupancy granted by September 30, 2025. Everything else, including those October-December completions, goes into the "not yet fully reflected" group.
 
 ```{r}
 #| label: cohort-split
-final_cohort <- matched_2024_all |>
+final_cohort <- rowhome_2024_matched |>
   filter(
     !is.na(occupancy_granted_date),
-    occupancy_granted_date <= occupancy_cutoff
+    occupancy_granted_date <= occupancy_cutoff,
+    gross_uplift > 0
   )
 
-not_yet_complete_matched <- matched_2024_all |>
-  anti_join(final_cohort, by = "permit_row_id")
+not_yet_complete_matched <- rowhome_2024_matched |>
+  anti_join(final_cohort, by = "legal_description")
 
 n_final_cohort <- nrow(final_cohort)
 ```
 
-The measurement cohort is `r n_final_cohort` properties. As an example, @tbl-spotlight traces two properties through the process, from their pre-redevelopment assessed value, through a mid-construction 2025 assessment, to their completed 2026 value. The Alberta Avenue example received occupancy in November 2025, yet its 2026 value looks fully assessed. This shows that the lag in @fig-assessment-lag is a trend, not a rule, which is why the conservative September cutoff is used for measurement.
-
-```{r}
-#| label: tbl-spotlight
-#| tbl-cap: "Two properties traced from pre-redevelopment (2024) through mid-construction (2025) to a completed 5 to 8 unit rowhome (2026)"
-spotlight_accounts <- c("4042701", "2049286")
-
-matched_2024_all |>
-  filter(account_number %in% spotlight_accounts) |>
-  mutate(
-    neighbourhood = str_to_title(neighbourhood),
-    mill_class_1 = str_to_title(mill_class_1)
-  ) |>
-  select(
-    neighbourhood,
-    units_added,
-    value_2024,
-    value_2025,
-    value_2026,
-    mill_class_1
-  ) |>
-  arrange(neighbourhood) |>
-  gt() |>
-  fmt_currency(columns = c(value_2024, value_2025, value_2026), decimals = 0) |>
-  cols_label(
-    neighbourhood = "Neighbourhood",
-    units_added = "Units",
-    value_2024 = "2024 (before)",
-    value_2025 = "2025 (mid-construction)",
-    value_2026 = "2026 (completed)",
-    mill_class_1 = "2026 assessment class"
-  ) |>
-  tab_header(
-    title = "Two 5 to 8 unit rowhomes, before and after",
-    subtitle = "Assessed value by year"
-  ) |>
-  finalize_gt() |>
-  opt_stylize_jd()
-```
+All together, the measurement cohort is `r n_final_cohort` lots.
 
 #### The rest of the 2024 cohort
 
-The `r n_final_cohort` properties above only cover 2024 permits whose completed buildings the 2026 assessment has caught up with. The remaining matched permits, `r nrow(not_yet_complete_matched)` of them, are either still under construction or finished too late in 2025 for the assessment to reflect. Their 2026 assessed values still tell us something: whatever value the construction had reached, a partial uplift. @tbl-2024-actual-total combines both groups into a single, fully-observed total for the 2024 permit year.
+The `r n_final_cohort` lots above only cover 2024-permitted lots whose completed buildings the 2026 assessment has caught up with. The remaining matched lots, `r nrow(not_yet_complete_matched)` of them, are either still under construction or finished too late in 2025 for the assessment to reflect. Their 2026 assessed values still tell us something: whatever value the construction had reached, a partial uplift. @tbl-2024-actual-total combines both groups into a single, fully-observed total for the 2024 permit year.
 
 ```{r}
 #| label: tbl-2024-actual-total
@@ -594,10 +794,10 @@ The `r n_final_cohort` properties above only cover 2024 permits whose completed 
 status_complete <- "Occupancy by Sept 2025"
 status_partial <- "Occupancy after Sept 2025"
 
-actual_2024 <- matched_2024_all |>
+actual_2024 <- rowhome_2024_matched |>
   mutate(
     status = if_else(
-      permit_row_id %in% final_cohort$permit_row_id,
+      legal_description %in% final_cohort$legal_description,
       status_complete,
       status_partial
     )
@@ -623,13 +823,17 @@ gt(actual_2024_summary, rowname_col = "status") |>
       ~ fmt_currency(
         .,
         columns = c(median_gross_uplift, total_gross_uplift),
-        decimals = 0
+        decimals = 1,
+        scale_by = 1e-6,
+        pattern = "{x}M"
       )
     )
   ) |>
   fmt_currency(
     columns = c(median_gross_uplift, total_gross_uplift),
-    decimals = 0
+    decimals = 1,
+    scale_by = 1e-6,
+    pattern = "{x}M"
   ) |>
   cols_label(
     n = "n",
@@ -648,7 +852,7 @@ That gives a fully-observed total of `r label_dollars_adaptive(sum(actual_2024_s
 
 #### From gross uplift to a fairer comparison
 
-The raw 2024-to-2026 difference in assessed value overstates the effect of redevelopment on its own, because Edmonton property values were also generally rising over that period. To isolate the redevelopment effect, I build a comparison: what would each property have been worth in 2026 if it hadn't been redeveloped? I estimate this from a group of RS-zoned properties in mature neighbourhoods that were not part of any 2024-2026 residential new-build permit, taking the median ratio of their 2026 to 2024 assessed value as a general appreciation factor. This un-redeveloped control group may not appreciate at exactly the rate the redeveloped lots would have, but it's a reasonable counterfactual, and good enough for what I'm trying to measure here.
+The raw 2024-to-2026 difference in assessed value overstates the effect of redevelopment on its own, because Edmonton property values were also generally rising over that period. To isolate the redevelopment effect, I build a comparison: what would each property have been worth in 2026 if it hadn't been redeveloped? I estimate this from a group of RS-zoned properties in mature neighbourhoods that were not part of any 2024-2026 residential new-build permit, taking the median ratio of their 2026 to 2024 assessed value as a general appreciation factor. This un-redeveloped control group may not have appreciated at the rate the redeveloped lots would have, but it's good enough for a blog post.
 
 ```{r}
 #| label: counterfactual-growth
@@ -688,10 +892,7 @@ nbhd_median_rs_value <- assessment_2024 |>
   summarise(nbhd_median_value = median(assessed_value), .groups = "drop")
 
 final_cohort <- final_cohort |>
-  mutate(
-    gross_uplift = value_2026 - value_2024,
-    net_uplift = value_2026 - g * value_2024
-  ) |>
+  mutate(net_uplift = value_2026 - g * value_2024) |>
   left_join(
     nbhd_median_rs_value,
     by = c("neighbourhood" = "neighbourhood_name")
@@ -704,13 +905,15 @@ stopifnot(
 )
 ```
 
-Across `r comma(nrow(control_group))` non-redeveloped RS Zone properties in mature neighbourhoods, the median 2024-to-2026 growth ratio is `r round(g, 2)`x, meaning a typical mature-neighbourhood house that wasn't touched still gained about `r percent(g - 1, accuracy = 1)` in assessed value over those two years. I use this as the baseline against which redevelopment uplift is measured. Net uplift is the completed 5 to 8 unit rowhome's 2026 value minus `r round(g, 2)` times its 2024 baseline, isolating the redevelopment effect from general market appreciation. Gross uplift is the simple, unadjusted difference, shown alongside it for comparison.
+Across `r comma(nrow(control_group))` non-redeveloped RS Zone properties in mature neighbourhoods, the median 2024-to-2026 growth ratio is `r round(g, 2)`x, meaning a typical mature-neighbourhood house that wasn't touched still gained about `r percent(g - 1, accuracy = 1)` in assessed value over those two years. I use this as the baseline against which redevelopment uplift is measured.
 
-@fig-uplift-distribution shows the distribution of both measures across the `r n_final_cohort` matched properties, split by project size.
+This brings us to the two measures of property tax uplift. **Net uplift** is the completed 5 to 8 unit rowhome's 2026 value minus `r round(g, 2)` times its 2024 baseline, isolating the redevelopment effect from general market appreciation. **Gross uplift** is the simple, unadjusted difference, shown alongside it for comparison.
+
+@fig-uplift-distribution shows the distribution of both measures across the `r n_final_cohort` matched lots, split by project size.
 
 ```{r}
 #| label: fig-uplift-distribution
-#| fig-cap: "Distribution of assessed value uplift per redeveloped property, gross and net of market appreciation"
+#| fig-cap: "Distribution of assessed value uplift per redeveloped lot, gross and net of market appreciation"
 uplift_long <- final_cohort |>
   select(bucket, gross_uplift, net_uplift) |>
   pivot_longer(
@@ -730,7 +933,7 @@ ggplot(uplift_long, aes(x = bucket, y = uplift, fill = type)) +
   geom_boxplot(outlier.alpha = 0.4, position = position_dodge(width = 0.75)) +
   scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
   labs(
-    title = "Assessed value uplift per redeveloped property",
+    title = "Assessed value uplift per redeveloped lot",
     subtitle = "2024 RS Zone 5-8 unit rowhomes, mature neighbourhoods,\noccupancy by Sept 2025",
     x = NULL,
     y = "Assessed value uplift",
@@ -740,7 +943,7 @@ ggplot(uplift_long, aes(x = bucket, y = uplift, fill = type)) +
   theme_jd(mode = "light")
 ```
 
-@tbl-uplift-rules compares three simple ways of summarizing this uplift into a single per-project figure: a median per property within two size buckets (5-6 units and 7-8 units), a single median per property across all sizes, and a median per home added, which can be scaled by any project's unit count. These serve as sanity anchors for the model-based rule developed next.
+@tbl-uplift-rules compares three simple ways of summarizing this uplift into a single per-project figure: a median per lot within two size buckets (5-6 units and 7+ units), a single median per lot across all sizes, and a median per home added, which can be scaled by any project's unit count. These serve as sanity anchors for the model-based rule developed next.
 
 ```{r}
 #| label: tbl-uplift-rules
@@ -769,7 +972,12 @@ rule_per_unit <- final_cohort |>
 
 bind_rows(rule_bucketed, rule_pooled, rule_per_unit) |>
   gt(rowname_col = "rule") |>
-  fmt_currency(columns = c(gross, net), decimals = 0) |>
+  fmt_currency(
+    columns = c(gross, net),
+    decimals = 1,
+    scale_by = 1e-6,
+    pattern = "{x}M"
+  ) |>
   cols_label(
     n = "n",
     gross = "Median gross uplift",
@@ -785,26 +993,25 @@ bind_rows(rule_bucketed, rule_pooled, rule_per_unit) |>
 
 ### Applying the same method to plexes and backyard homes
 
-The same matching machinery walked through above for the 5 to 8 unit rowhome — legal-key join, 25m geo-fallback, occupancy cutoff, counterfactual growth adjustment — applies just as well to 2 to 4 unit plexes and backyard homes (garden suites). Each is matched to permits on lots not already claimed by a more intensive category, so a lot with both a fourplex redevelopment and a backyard-suite permit counts once. Backyard homes are structurally different from the other two: they add a suite behind a *retained* house rather than replacing it, so their uplift is a smaller, additive effect rather than a full-lot redevelopment.
+The same matching-and-consolidation machinery walked through above for the 5 to 8 unit rowhome — legal-key join, 25m geo-fallback, civic-address fallback, same-lot consolidation, split-lot baseline sharing, occupancy cutoff, counterfactual growth adjustment — has already been applied across all three categories together (@sec-consolidating). Backyard homes are structurally different from the other two: they add a suite behind a *retained* house rather than replacing it, so their uplift is a smaller, additive effect rather than a full-lot redevelopment.
 
 ```{r}
 #| label: other-category-cohorts
-# Reusable: the same measured-cohort recipe used for rowhomes above (match
-# baseline -> geo fallback -> match outcome -> occupancy cutoff -> net
-# uplift), generalized to any small-scale-infill pipeline. Skips the
-# hand-matched re-platted-lot cases, which were specific to three 2024
-# rowhome permits.
-build_completed_cohort <- function(pipeline) {
-  cohort <- pipeline |> filter(year == 2024)
-  matched <- match_baseline_2024(cohort) |> geo_fallback_baseline(cohort)
-  match_outcome_2026(matched, cohort) |>
-    filter(!is.na(value_2026)) |>
-    mutate(gross_uplift = value_2026 - value_2024) |>
+# The same measured-cohort recipe used for rowhomes above (occupancy
+# cutoff -> net uplift), generalized to any category already consolidated
+# into `sites`.
+measured_cohort <- function(cat) {
+  sites |>
     filter(
+      category == cat,
+      year == 2024,
+      !is.na(value_2024),
+      !is.na(value_2026),
       !is.na(occupancy_granted_date),
-      occupancy_granted_date <= occupancy_cutoff,
-      gross_uplift > 0
+      occupancy_granted_date <= occupancy_cutoff
     ) |>
+    mutate(gross_uplift = value_2026 - value_2024) |>
+    filter(gross_uplift > 0) |>
     left_join(
       nbhd_median_rs_value,
       by = c("neighbourhood" = "neighbourhood_name")
@@ -813,20 +1020,26 @@ build_completed_cohort <- function(pipeline) {
     mutate(net_uplift = value_2026 - g * value_2024)
 }
 
-plex_final_cohort <- build_completed_cohort(plex_pipeline)
-backyard_final_cohort <- build_completed_cohort(backyard_pipeline)
+plex_final_cohort <- measured_cohort("plex")
+backyard_final_cohort <- measured_cohort("backyard")
 
 n_plex_final_cohort <- nrow(plex_final_cohort)
 n_backyard_final_cohort <- nrow(backyard_final_cohort)
+
+# No lot's uplift should be counted more than once in either measured
+# cohort -- each is already a distinct legal_description by construction,
+# so this is a defensive check rather than an expected failure mode.
+stopifnot(
+  n_distinct(plex_final_cohort$legal_description) == n_plex_final_cohort,
+  n_distinct(backyard_final_cohort$legal_description) == n_backyard_final_cohort
+)
 ```
 
-That yields a completed, measured cohort of `r n_plex_final_cohort` 2 to 4 unit plexes and `r n_backyard_final_cohort` backyard homes, alongside the `r n_final_cohort` 5 to 8 unit rowhomes measured above — `r n_final_cohort + n_plex_final_cohort + n_backyard_final_cohort` properties in total to fit a model on.
+That yields a completed, measured cohort of `r n_plex_final_cohort` 2 to 4 unit plexes and `r n_backyard_final_cohort` backyard homes, alongside the `r n_final_cohort` 5 to 8 unit rowhomes measured above — `r n_final_cohort + n_plex_final_cohort + n_backyard_final_cohort` lots in total to fit a model on.
 
 ### A model for uplift {#sec-model-for-uplift}
 
-The simple rules above ignore everything about a project except its unit count. But uplift plausibly varies with location too: land near LRT stations and in more expensive neighbourhoods could command different completed values. So alongside the flat medians, I fit a single model — across all three small-scale-infill categories together, not one model per category — of gross uplift on: units added, distance from the nearest LRT stop, the neighbourhood's median RS-zone assessed value, and a backyard-home indicator. I used a generalized additive model (GAM) rather than a plain linear regression, letting each covariate bend as the data demands instead of forcing a hand-picked transform onto it.
-
-Pooling the three categories into one fit lets 2 to 4 unit plexes and backyard homes — both with too few measured completions to support their own stable fit — borrow the unit-count and land-value relationship estimated mostly from the larger 5 to 8 unit rowhome sample, with the backyard-home indicator capturing the one place they genuinely differ: adding a suite behind a retained house rather than replacing the lot.
+The simple rules above ignore everything about a project except its unit count. But uplift plausibly varies with location too: land near LRT stations and in more expensive neighbourhoods could command different completed values. So alongside the flat medians, I fit a single model of gross uplift on units added, distance from the nearest LRT stop, the neighbourhood's median RS-zone assessed value, and a backyard-home indicator. I used a generalized additive model (GAM) rather than a plain linear regression for maximum flexibility.
 
 ```{r}
 #| label: uplift-model
@@ -885,27 +1098,24 @@ bias_by_cat <- tapply(
 )
 ```
 
-As a sanity check against @tbl-uplift-rules: the model's average predicted uplift across the measured 5 to 8 unit rowhome cohort alone is `r label_dollars_adaptive(mean(predict(uplift_model, final_cohort |> mutate(is_backyard = FALSE))))` per property, broadly in line with the simple medians there, as it should be — even though the model is now fit on the pooled `r n_pooled_cohort`-property cohort rather than the `r n_final_cohort` rowhomes alone. What the model adds is the ability to give each individual permit a prediction tailored to its size, location, and category, which matters when extrapolating to hundreds of permits whose size mix and geography differ from the measured cohort's.
+Checking against @tbl-uplift-rules, the model's average predicted uplift across the measured 5 to 8 unit rowhome cohort alone is `r label_dollars_adaptive(mean(predict(uplift_model, final_cohort |> mutate(is_backyard = FALSE))))` per property, in line with the simple rules. What the model adds is the additional prediction accuracy, which matters when extrapolating to hundreds of lots whose size mix and geography differ from the measured cohort's.
 
-It's also good enough on its own terms: leave-one-out cross-validated, it predicts held-out gross uplift to within `r label_dollars_adaptive(rmse_gam)` RMSE, versus `r label_dollars_adaptive(rmse_median)` for a single flat median across the pooled cohort — and it does so with no systematic over- or under-prediction in any of the three categories (average held-out error `r comma(round(bias_by_cat["Rowhome"]))`, `r comma(round(bias_by_cat["2-4plex"]))`, and `r comma(round(bias_by_cat["Backyard home"]))` dollars for 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes respectively).
-
-For net uplift, the counterfactual adjustment is applied after prediction: a property's predicted net uplift is its predicted gross uplift minus (`r round(g, 2)` − 1) times its own 2024 baseline value, the same adjustment used for the measured cohort.
-
-One pooled model now values all three pipelines on the same footing. The rest of this post uses it to answer the question the intro posed: what does all of this small-scale infill add up to, citywide, at steady state — and then follows the 5 to 8 unit rowhome, the largest category, through its own pipeline in more detail.
+For net uplift, the counterfactual adjustment is applied after prediction: a lot's predicted net uplift is its predicted gross uplift minus (`r round(g, 2) - 1`) times its own 2024 baseline value, the same adjustment used for the measured cohort.
 
 ## What all this infill is worth
 
-To go from the measured cohort to the full pipeline, I apply the pooled model to every other mature-neighbourhood permit in all three categories issued since 2024: the rest of the 2024 cohort (permits that didn't match or aren't fully assessed yet), all of 2025, and 2026. Each permit gets a prediction from its own unit count, LRT distance, neighbourhood, and category.
+To go from the measured cohort to the full pipeline, I use the predictions of the model on the non-measured lots: the rest of the 2024 cohort (lots that didn't match or aren't fully assessed yet), and lots from 2025 and 2026.
 
-This is a **steady-state estimate**: it assumes every one of those permits eventually reaches the completed-building uplift the model predicts, once construction wraps up and a future assessment catches up to it. It is not the smaller amount those properties currently show in the 2026 roll, which @tbl-2024-actual-total showed directly for the 5 to 8 unit rowhome's not-yet-reflected 2024 permits. The gap between that actual, partial total and the steady-state estimate below is construction and assessment lag, not double-counting.
+::: {.callout-note}
+Model predictions are **steady-state estimates** of uplift. They represent the eventual outcome once construction wraps up and a future assessment incorporates the finished product.
+:::
 
-Extending the pooled model to all three pipelines — 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes — gives a comprehensive, apples-to-apples picture of what all of it is worth, with every lot counted once under its most intensive project (@tbl-comprehensive-infill). The maths runs below; the 5 to 8 unit rowhome pipeline is detailed step by step first because it's the largest category, then the same extrapolation is repeated for the other two.
 
 ```{r}
 #| label: pipeline-counts
-pipeline_counts <- rowhome_pipeline |>
-  st_drop_geometry() |>
-  mutate(bucket = if_else(units_added <= 6, "5-6 units", "7-8 units")) |>
+pipeline_counts <- sites |>
+  filter(category == "rowhome") |>
+  mutate(bucket = if_else(units_added <= 6, "5-6 units", "7+ units")) |>
   count(year, bucket)
 
 # H1 annualization multiplier, same method as the Q2 2026 report: median
@@ -934,89 +1144,39 @@ n_2026_h1 <- pipeline_counts |>
   filter(year == 2026) |>
   summarise(n = sum(n)) |>
   pull(n)
+n_2026_projected <- n_2026_h1 * h1_multiplier
 ```
 
 ```{r}
 #| label: extrapolation
-# Blended municipal tax rate per size bucket, weighted by each bucket's
-# observed mix of Residential vs. Other Residential assessment class. Used
-# both for the extrapolated tax figures below and, via bucket_rates_2026,
-# for the neighbourhood breakdown later in the post.
-bucket_rates_2026 <- final_cohort |>
-  mutate(bucket = if_else(units_added <= 6, "5-6 units", "7-8 units")) |>
-  count(bucket, mill_class_1) |>
-  group_by(bucket) |>
-  mutate(share = n / sum(n)) |>
-  summarise(
-    rate = sum(
-      share *
-        if_else(
-          mill_class_1 == "OTHER RESIDENTIAL",
-          municipal_rate("Other Residential", 2026),
-          municipal_rate("Residential", 2026)
-        )
-    ),
-    .groups = "drop"
-  )
-
-bucket_rates_2025 <- final_cohort |>
-  mutate(bucket = if_else(units_added <= 6, "5-6 units", "7-8 units")) |>
-  count(bucket, mill_class_1) |>
-  group_by(bucket) |>
-  mutate(share = n / sum(n)) |>
-  summarise(
-    rate = sum(
-      share *
-        if_else(
-          mill_class_1 == "OTHER RESIDENTIAL",
-          municipal_rate("Other Residential", 2025),
-          municipal_rate("Residential", 2025)
-        )
-    ),
-    .groups = "drop"
-  )
-
-measured_ids <- final_cohort$permit_row_id
-
-# Baselines for 2025/2026 permits, using the same matchers as the 2024 cohort
-permits_2025_2026 <- rowhome_pipeline |> filter(year %in% 2025:2026)
-future_baselines <- match_baseline_2024(permits_2025_2026) |>
-  geo_fallback_baseline(permits_2025_2026) |>
-  select(permit_row_id, value_2024)
-
-baseline_match_rate <- mean(!is.na(future_baselines$value_2024))
-
-# Every mature RS 5-8 unit new-build permit with the model's covariates.
-# Fallbacks for prediction: median LRT distance for permits with no mapped
-# location; the neighbourhood median RS value doubles as the baseline proxy
-# for permits that didn't match one.
-median_pipeline_distance <- median(
-  rowhome_pipeline$distance_from_lrt,
-  na.rm = TRUE
+# Every site's model prediction, whatever its category or year -- a
+# single table the rest of this post's extrapolation reads from. A site
+# is "measured" if it's in one of the three measured cohorts already built
+# above (checked by legal_description, each site's unique key); everything
+# else gets a prediction from the pooled model, using its own baseline
+# where matched or its neighbourhood's median RS value as a stand-in
+# where not.
+measured_legal_keys <- c(
+  final_cohort$legal_description,
+  plex_final_cohort$legal_description,
+  backyard_final_cohort$legal_description
 )
 
-all_permits <- rowhome_pipeline |>
-  st_drop_geometry() |>
+median_distance <- median(sites$distance_from_lrt, na.rm = TRUE)
+median_nbhd_value <- median(nbhd_median_rs_value$nbhd_median_value)
+
+all_sites_pred <- sites |>
   filter(year %in% 2024:2026) |>
   left_join(
     nbhd_median_rs_value,
     by = c("neighbourhood" = "neighbourhood_name")
   ) |>
-  left_join(
-    bind_rows(
-      matched_2024_all |> select(permit_row_id, value_2024),
-      future_baselines
-    ),
-    by = "permit_row_id"
-  ) |>
   mutate(
-    nbhd_median_value = coalesce(
-      nbhd_median_value,
-      median(nbhd_median_rs_value$nbhd_median_value)
-    ),
-    distance_from_lrt = coalesce(distance_from_lrt, median_pipeline_distance),
+    nbhd_median_value = coalesce(nbhd_median_value, median_nbhd_value),
+    distance_from_lrt = coalesce(distance_from_lrt, median_distance),
     baseline_value = coalesce(value_2024, nbhd_median_value),
-    is_backyard = FALSE,
+    is_backyard = category == "backyard",
+    is_measured = legal_description %in% measured_legal_keys,
     pred_gross = as.numeric(predict(
       uplift_model,
       newdata = pick(
@@ -1026,117 +1186,39 @@ all_permits <- rowhome_pipeline |>
         nbhd_median_value
       )
     )),
-    pred_net = pred_gross - (g - 1) * baseline_value,
-    bucket = if_else(units_added <= 6, "5-6 units", "7-8 units")
-  ) |>
-  left_join(bucket_rates_2026, by = "bucket") |>
-  rename(rate_2026 = rate) |>
-  left_join(bucket_rates_2025, by = "bucket") |>
-  rename(rate_2025 = rate) |>
-  mutate(
-    pred_tax_gross_2026 = pred_gross * rate_2026,
-    pred_tax_net_2026 = pred_net * rate_2026,
-    pred_tax_net_2025 = pred_net * rate_2025
+    pred_net = pred_gross - (g - 1) * baseline_value
   )
 
-measured_totals <- final_cohort |>
-  summarise(gross = sum(gross_uplift), net = sum(net_uplift))
+# Blended municipal tax rate per rowhome size bucket, weighted by each
+# bucket's observed mix of Residential vs. Other Residential assessment
+# class in the measured cohort. Used both for the extrapolated tax figures
+# below and, via bucket_rates_2026, for the neighbourhood breakdown later.
+bucket_rate <- function(bucket_data, yr) {
+  bucket_data |>
+    mutate(bucket = if_else(units_added <= 6, "5-6 units", "7+ units")) |>
+    count(bucket, mill_class_1) |>
+    group_by(bucket) |>
+    mutate(share = n / sum(n)) |>
+    summarise(
+      rate = sum(
+        share *
+          if_else(
+            mill_class_1 == "OTHER RESIDENTIAL",
+            municipal_rate("Other Residential", yr),
+            municipal_rate("Residential", yr)
+          )
+      ),
+      .groups = "drop"
+    )
+}
 
-model_based_2024 <- all_permits |>
-  filter(year == 2024, !permit_row_id %in% measured_ids) |>
-  summarise(
-    gross = sum(pred_gross),
-    net = sum(pred_net),
-    tax_gross_2026 = sum(pred_tax_gross_2026),
-    tax_net_2026 = sum(pred_tax_net_2026),
-    tax_net_2025 = sum(pred_tax_net_2025)
-  )
+bucket_rates_2026 <- bucket_rate(final_cohort, 2026)
+bucket_rates_2025 <- bucket_rate(final_cohort, 2025)
 
-model_based_2025 <- all_permits |>
-  filter(year == 2025) |>
-  summarise(
-    gross = sum(pred_gross),
-    net = sum(pred_net),
-    tax_gross_2026 = sum(pred_tax_gross_2026),
-    tax_net_2026 = sum(pred_tax_net_2026),
-    tax_net_2025 = sum(pred_tax_net_2025)
-  )
-
-model_based_2026_h1 <- all_permits |>
-  filter(year == 2026) |>
-  summarise(
-    gross = sum(pred_gross),
-    net = sum(pred_net),
-    tax_gross_2026 = sum(pred_tax_gross_2026),
-    tax_net_2026 = sum(pred_tax_net_2026),
-    tax_net_2025 = sum(pred_tax_net_2025)
-  )
-
-# 2026 full-year projection: no per-permit rows exist yet for the
-# un-permitted remainder of the year, so scale H1's predicted total.
-model_based_2026_projected_remainder <- model_based_2026_h1 |>
-  mutate(
-    gross = gross * (h1_multiplier - 1),
-    net = net * (h1_multiplier - 1),
-    tax_gross_2026 = tax_gross_2026 * (h1_multiplier - 1),
-    tax_net_2026 = tax_net_2026 * (h1_multiplier - 1)
-  )
-
-total_gross_uplift <- measured_totals$gross +
-  model_based_2024$gross +
-  model_based_2025$gross +
-  model_based_2026_h1$gross +
-  model_based_2026_projected_remainder$gross
-total_net_uplift <- measured_totals$net +
-  model_based_2024$net +
-  model_based_2025$net +
-  model_based_2026_h1$net +
-  model_based_2026_projected_remainder$net
-
-n_2026_projected <- n_2026_h1 * h1_multiplier
-```
-
-```{r}
-#| label: tax-conversion
-tax_measured <- final_cohort |>
-  mutate(
-    new_rate = if_else(
-      mill_class_1 == "OTHER RESIDENTIAL",
-      municipal_rate("Other Residential", 2026),
-      municipal_rate("Residential", 2026)
-    ),
-    annual_tax_gross = new_rate *
-      value_2026 -
-      municipal_rate("Residential", 2026) * value_2024,
-    annual_tax_net = new_rate *
-      value_2026 -
-      municipal_rate("Residential", 2026) * g * value_2024
-  ) |>
-  summarise(gross = sum(annual_tax_gross), net = sum(annual_tax_net))
-
-tax_model_based_gross <- model_based_2024$tax_gross_2026 +
-  model_based_2025$tax_gross_2026 +
-  model_based_2026_h1$tax_gross_2026 +
-  model_based_2026_projected_remainder$tax_gross_2026
-tax_model_based_net <- model_based_2024$tax_net_2026 +
-  model_based_2025$tax_net_2026 +
-  model_based_2026_h1$tax_net_2026 +
-  model_based_2026_projected_remainder$tax_net_2026
-
-annual_tax_uplift_gross <- tax_measured$gross + tax_model_based_gross
-annual_tax_uplift_net <- tax_measured$net + tax_model_based_net
-```
-
-```{r}
-#| label: comprehensive-extrapolation
-# Blended municipal tax rate for a whole category, weighted by that
-# category's own observed mix of Residential vs. Other Residential
-# assessment class. Unlike the 5 to 8 unit rowhome rate (bucketed by unit
-# count, in bucket_rates_2026/2025 above), plex and backyard cohorts are
-# too small to split further, so one flat rate per category is used.
+# A category's own flat blended rate (plex/backyard cohorts are too small
+# to split further by size).
 category_tax_rate <- function(cohort, yr) {
   cohort |>
-    st_drop_geometry() |>
     count(mill_class_1) |>
     mutate(share = n / sum(n)) |>
     summarise(
@@ -1151,148 +1233,165 @@ category_tax_rate <- function(cohort, yr) {
     ) |>
     pull(rate)
 }
+plex_rate_2026 <- category_tax_rate(plex_final_cohort, 2026)
+backyard_rate_2026 <- category_tax_rate(backyard_final_cohort, 2026)
 
-# Extrapolates one category's full 2024-H1 2026 pipeline through the same
-# pooled uplift_model used for the 5 to 8 unit rowhome, mirroring the
-# rowhome extrapolation chunk above but generalized to any
-# pipeline/measured-cohort pair and its own is_backyard flag.
-extrapolate_category <- function(pipeline, final, is_backyard_flag) {
-  measured_ids <- final$permit_row_id
-  fut <- pipeline |> filter(year %in% 2025:2026)
-  future_baselines <- match_baseline_2024(fut) |>
-    geo_fallback_baseline(fut) |>
-    select(permit_row_id, value_2024)
-  median_dist <- median(pipeline$distance_from_lrt, na.rm = TRUE)
-  rate_2026 <- category_tax_rate(final, 2026)
+all_sites_pred <- all_sites_pred |>
+  mutate(
+    bucket = if_else(units_added <= 6, "5-6 units", "7+ units"),
+    rate_2026 = case_when(
+      category == "rowhome" ~ NA_real_,
+      category == "plex" ~ plex_rate_2026,
+      category == "backyard" ~ backyard_rate_2026
+    ),
+    rate_2025 = if_else(category == "plex", plex_rate_2026, backyard_rate_2026)
+  ) |>
+  left_join(bucket_rates_2026, by = "bucket") |>
+  mutate(rate_2026 = coalesce(rate_2026, rate)) |>
+  select(-rate) |>
+  left_join(bucket_rates_2025, by = "bucket") |>
+  mutate(rate_2025 = if_else(category == "rowhome", rate, rate_2025)) |>
+  select(-rate) |>
+  mutate(
+    pred_tax_gross_2026 = pred_gross * rate_2026,
+    pred_tax_net_2026 = pred_net * rate_2026,
+    pred_tax_net_2025 = pred_net * rate_2025
+  )
 
-  all_p <- pipeline |>
-    st_drop_geometry() |>
-    filter(year %in% 2024:2026) |>
-    left_join(
-      nbhd_median_rs_value,
-      by = c("neighbourhood" = "neighbourhood_name")
-    ) |>
-    left_join(
-      bind_rows(
-        final |> st_drop_geometry() |> select(permit_row_id, value_2024),
-        future_baselines
-      ),
-      by = "permit_row_id"
-    ) |>
-    mutate(
-      nbhd_median_value = coalesce(
-        nbhd_median_value,
-        median(nbhd_median_rs_value$nbhd_median_value)
-      ),
-      distance_from_lrt = coalesce(distance_from_lrt, median_dist),
-      baseline_value = coalesce(value_2024, nbhd_median_value),
-      is_backyard = is_backyard_flag,
-      pred_gross = as.numeric(predict(
-        uplift_model,
-        newdata = pick(
-          is_backyard,
-          units_added,
-          distance_from_lrt,
-          nbhd_median_value
-        )
-      )),
-      pred_net = pred_gross - (g - 1) * baseline_value,
-      pred_tax_net = pred_net * rate_2026
-    )
+# Summarizes one category's steady-state total: measured sites keep their
+# actual net uplift; everything else uses the model prediction, weighted
+# by the H1-2026 annualization multiplier for the un-permitted remainder
+# of 2026.
+category_totals <- function(cat, measured) {
+  pred <- all_sites_pred |> filter(category == cat)
 
-  measured_totals <- final |>
-    st_drop_geometry() |>
-    summarise(net = sum(net_uplift), tax_net = sum(net_uplift * rate_2026))
+  model_2024 <- pred |> filter(year == 2024, !is_measured)
+  model_2025 <- pred |> filter(year == 2025)
+  model_2026_h1 <- pred |> filter(year == 2026)
 
-  model_2024 <- all_p |>
-    filter(year == 2024, !permit_row_id %in% measured_ids) |>
-    summarise(net = sum(pred_net), tax_net = sum(pred_tax_net))
-  model_2025 <- all_p |>
-    filter(year == 2025) |>
-    summarise(net = sum(pred_net), tax_net = sum(pred_tax_net))
-  model_2026_h1 <- all_p |>
-    filter(year == 2026) |>
-    summarise(net = sum(pred_net), tax_net = sum(pred_tax_net))
-  model_2026_rest <- model_2026_h1 |>
-    mutate(
-      net = net * (h1_multiplier - 1),
-      tax_net = tax_net * (h1_multiplier - 1)
-    )
-
-  total_net <- measured_totals$net +
-    model_2024$net +
-    model_2025$net +
-    model_2026_h1$net +
-    model_2026_rest$net
-  total_tax_net <- measured_totals$tax_net +
-    model_2024$tax_net +
-    model_2025$tax_net +
-    model_2026_h1$tax_net +
-    model_2026_rest$tax_net
-
-  by_year <- pipeline |> st_drop_geometry() |> count(year)
-  n_2024 <- by_year |>
-    filter(year == 2024) |>
-    pull(n) |>
-    (\(x) if (length(x) == 0) 0 else x)()
-  n_2025 <- by_year |>
-    filter(year == 2025) |>
-    pull(n) |>
-    (\(x) if (length(x) == 0) 0 else x)()
-  n_2026_h1_n <- by_year |>
-    filter(year == 2026) |>
-    pull(n) |>
-    (\(x) if (length(x) == 0) 0 else x)()
-  n_projects <- n_2024 + n_2025 + round(n_2026_h1_n * h1_multiplier)
-
-  units_by_year <- pipeline |>
-    st_drop_geometry() |>
-    group_by(year) |>
-    summarise(u = sum(units_added), .groups = "drop")
-  units_of <- function(yr) {
-    x <- units_by_year |> filter(year == yr) |> pull(u)
-    if (length(x) == 0) 0 else x
+  sum_cols <- function(d) {
+    d |>
+      summarise(
+        gross = sum(pred_gross),
+        net = sum(pred_net),
+        tax_gross_2026 = sum(pred_tax_gross_2026),
+        tax_net_2026 = sum(pred_tax_net_2026),
+        tax_net_2025 = sum(pred_tax_net_2025)
+      )
   }
-  homes_added <- units_of(2024) +
-    units_of(2025) +
-    round(units_of(2026) * h1_multiplier)
+  m2024 <- sum_cols(model_2024)
+  m2025 <- sum_cols(model_2025)
+  m2026h1 <- sum_cols(model_2026_h1)
+  m2026rest <- m2026h1 |>
+    mutate(across(everything(), \(x) x * (h1_multiplier - 1)))
 
-  tibble(
-    n_projects = n_projects,
-    homes_added = homes_added,
-    net_uplift = total_net,
-    annual_tax_uplift = total_tax_net
+  measured_totals <- measured |>
+    summarise(gross = sum(gross_uplift), net = sum(net_uplift))
+
+  n_2024 <- pred |> filter(year == 2024) |> nrow()
+  n_2025 <- pred |> filter(year == 2025) |> nrow()
+  n_2026_h1_n <- pred |> filter(year == 2026) |> nrow()
+  homes_2024 <- pred |>
+    filter(year == 2024) |>
+    summarise(u = sum(units_added)) |>
+    pull(u)
+  homes_2025 <- pred |>
+    filter(year == 2025) |>
+    summarise(u = sum(units_added)) |>
+    pull(u)
+  homes_2026_h1 <- pred |>
+    filter(year == 2026) |>
+    summarise(u = sum(units_added)) |>
+    pull(u)
+
+  list(
+    n_projects = n_2024 + n_2025 + round(n_2026_h1_n * h1_multiplier),
+    homes_added = homes_2024 +
+      homes_2025 +
+      round(homes_2026_h1 * h1_multiplier),
+    total_gross_uplift = measured_totals$gross +
+      m2024$gross +
+      m2025$gross +
+      m2026h1$gross +
+      m2026rest$gross,
+    total_net_uplift = measured_totals$net +
+      m2024$net +
+      m2025$net +
+      m2026h1$net +
+      m2026rest$net,
+    annual_tax_uplift_gross = sum(
+      measured |>
+        mutate(
+          new_rate = if_else(
+            mill_class_1 == "OTHER RESIDENTIAL",
+            municipal_rate("Other Residential", 2026),
+            municipal_rate("Residential", 2026)
+          ),
+          t = new_rate *
+            value_2026 -
+            municipal_rate("Residential", 2026) * value_2024
+        ) |>
+        pull(t)
+    ) +
+      m2024$tax_gross_2026 +
+      m2025$tax_gross_2026 +
+      m2026h1$tax_gross_2026 +
+      m2026rest$tax_gross_2026,
+    annual_tax_uplift_net = sum(
+      measured |>
+        mutate(
+          new_rate = if_else(
+            mill_class_1 == "OTHER RESIDENTIAL",
+            municipal_rate("Other Residential", 2026),
+            municipal_rate("Residential", 2026)
+          ),
+          t = new_rate *
+            value_2026 -
+            municipal_rate("Residential", 2026) * g * value_2024
+        ) |>
+        pull(t)
+    ) +
+      m2024$tax_net_2026 +
+      m2025$tax_net_2026 +
+      m2026h1$tax_net_2026 +
+      m2026rest$tax_net_2026,
+    model_based_2024 = m2024,
+    model_based_2025 = m2025,
+    model_based_2026_h1 = m2026h1,
+    model_based_2026_rest = m2026rest,
+    measured_totals = measured_totals
   )
 }
 
-plex_totals <- extrapolate_category(plex_pipeline, plex_final_cohort, FALSE)
-backyard_totals <- extrapolate_category(
-  backyard_pipeline,
-  backyard_final_cohort,
-  TRUE
-)
+rowhome_results <- category_totals("rowhome", final_cohort)
+plex_results <- category_totals("plex", plex_final_cohort)
+backyard_results <- category_totals("backyard", backyard_final_cohort)
+```
 
-rowhome_totals <- tibble(
-  n_projects = n_2024_all + n_2025_all + round(n_2026_projected),
-  homes_added = {
-    units_by_year <- rowhome_pipeline |>
-      st_drop_geometry() |>
-      group_by(year) |>
-      summarise(u = sum(units_added), .groups = "drop")
-    units_of <- function(yr) {
-      x <- units_by_year |> filter(year == yr) |> pull(u)
-      if (length(x) == 0) 0 else x
-    }
-    units_of(2024) + units_of(2025) + round(units_of(2026) * h1_multiplier)
-  },
-  net_uplift = total_net_uplift,
-  annual_tax_uplift = annual_tax_uplift_net
-)
-
+```{r}
+#| label: comprehensive-extrapolation
 comprehensive_summary <- bind_rows(
-  rowhome_totals |> mutate(category = "5-8 unit rowhome", .before = 1),
-  plex_totals |> mutate(category = "2-4 unit plex", .before = 1),
-  backyard_totals |> mutate(category = "Backyard home", .before = 1)
+  tibble(
+    category = "5-8 unit rowhome",
+    n_projects = rowhome_results$n_projects,
+    homes_added = rowhome_results$homes_added,
+    net_uplift = rowhome_results$total_net_uplift,
+    annual_tax_uplift = rowhome_results$annual_tax_uplift_net
+  ),
+  tibble(
+    category = "2-4 unit plex",
+    n_projects = plex_results$n_projects,
+    homes_added = plex_results$homes_added,
+    net_uplift = plex_results$total_net_uplift,
+    annual_tax_uplift = plex_results$annual_tax_uplift_net
+  ),
+  tibble(
+    category = "Backyard home",
+    n_projects = backyard_results$n_projects,
+    homes_added = backyard_results$homes_added,
+    net_uplift = backyard_results$total_net_uplift,
+    annual_tax_uplift = backyard_results$annual_tax_uplift_net
+  )
 )
 comprehensive_summary <- bind_rows(
   comprehensive_summary,
@@ -1312,30 +1411,10 @@ comprehensive_net_uplift <- comprehensive_summary |>
 comprehensive_tax_uplift <- comprehensive_summary |>
   filter(category == "Total") |>
   pull(annual_tax_uplift)
+rowhome_totals <- list(net_uplift = rowhome_results$total_net_uplift)
 ```
 
-```{r}
-#| label: tbl-comprehensive-infill
-#| tbl-cap: "Comprehensive small-scale-infill uplift, all three RS Zone categories, 2024 through H1 2026 (2026 full year projected)"
-comprehensive_summary |>
-  gt(rowname_col = "category") |>
-  fmt_currency(columns = c(net_uplift, annual_tax_uplift), decimals = 0) |>
-  fmt_integer(columns = c(n_projects, homes_added)) |>
-  cols_label(
-    n_projects = "Projects",
-    homes_added = "Homes added",
-    net_uplift = "Net value uplift (steady state)",
-    annual_tax_uplift = "Est. annual municipal tax uplift"
-  ) |>
-  tab_header(
-    title = "All small-scale infill, comprehensive estimate",
-    subtitle = "5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes; one pooled model, one lot counted once"
-  ) |>
-  finalize_gt() |>
-  opt_stylize_jd()
-```
-
-@fig-comprehensive-infill shows the same three categories' net value uplift side by side. The 5 to 8 unit rowhome dominates, both because it adds the most units per lot and because it's been the more common redevelopment path since ZBR, but 2 to 4 unit plexes add a meaningful share on their own, and backyard homes — despite being a much smaller, additive effect per lot — still add up across hundreds of retained houses.
+@fig-comprehensive-infill plots the net value uplift side by side. The 5 to 8 unit rowhome dominates, both because it adds the most units per lot and because it's been the more common redevelopment path since ZBR, but 2 to 4 unit plexes add a meaningful share on their own. Backyard homes do not add a significant amount in assessment base uplift due to their smaller scale.
 
 ```{r}
 #| label: fig-comprehensive-infill
@@ -1357,297 +1436,76 @@ comprehensive_summary |>
   theme_jd(mode = "light")
 ```
 
-Adding 2 to 4 unit plexes and backyard homes to the 5 to 8 unit rowhome total brings the comprehensive estimate to **`r label_dollars_adaptive(comprehensive_net_uplift)`** in net assessed value uplift, and **`r label_dollars_adaptive(comprehensive_tax_uplift)`** a year in additional municipal property tax at steady state, across `r comma(sum(comprehensive_summary$n_projects[comprehensive_summary$category != "Total"]))` permitted small-scale-infill projects since ZBR took effect. The 5 to 8 unit rowhome alone accounts for `r percent(rowhome_totals$net_uplift / comprehensive_net_uplift, accuracy = 1)` of that value — it remains the single largest lever — but the other two categories aren't trivial: together they add roughly `r label_dollars_adaptive(comprehensive_net_uplift - rowhome_totals$net_uplift)` on top of it.
-
-The backyard-home figure should be read with more caution than the other two: it rests on only `r n_backyard_final_cohort` completed, measured suites, versus `r n_final_cohort` 5 to 8 unit rowhomes and `r n_plex_final_cohort` 2 to 4 unit plexes, so its per-project estimate is noisier even though the pooled model borrows strength from the larger categories to stabilize it.
-
-## Following the 5 to 8 unit rowhome through the pipeline
-
-The 5 to 8 unit rowhome is the largest single category, so it's worth following through its own pipeline in more detail. The measured cohort only covers 2024 permits that were both matchable and fully reflected in the 2026 assessment; the same steady-state extrapolation used for the comprehensive total above, applied here to the 5 to 8 unit rowhome alone, fills in the rest of the 2024 cohort plus all of 2025 and 2026.
-
-2025 permitted **`r n_2025_all`** more mature-neighbourhood 5 to 8 unit rowhomes, and H1 2026 has already permitted `r n_2026_h1`. Following the same [H1 annualization method used in the Q2 2026 report](../q2-building-permits/index.qmd), full-year 2026 is projected at `r h1_multiplier`x the H1 count.
-
-Predicting net uplift needs each permit's own 2024 baseline value, so the 2025 and 2026 permits are run through the same baseline matchers as the 2024 cohort (their lots all existed in the 2024 roll, pre-redevelopment).
-
-The 2025 and 2026 permits match their 2024 baselines at a **`r percent(baseline_match_rate, accuracy = 1)`** rate; the few that don't use their neighbourhood's median RS value as a stand-in baseline for the net adjustment.
-
-@fig-cumulative-value-uplift shows the resulting cumulative assessed value uplift by permit year, split between the actually-measured portion and the portion estimated with the model.
+Estimating the corresponding tax revenue in @tbl-comprehensive-infill, we can see that RS Zone infill will bring in an estimated **`r label_dollars_adaptive(comprehensive_tax_uplift)`** in additional municipal tax revenue at a steady state.
 
 ```{r}
-#| label: fig-cumulative-value-uplift
-#| fig-cap: "Cumulative estimated assessed value uplift from 5 to 8 unit rowhomes since ZBR, by permit year (net of appreciation)"
-#| classes: "preview-image"
-cumulative_by_year <- tibble(
-  year = c(2024, 2024, 2025, 2026, 2026),
-  source = c(
-    "Measured",
-    "Estimated (model)",
-    "Estimated (model)",
-    "Estimated (model)",
-    "Estimated (model)"
-  ),
-  net_uplift = c(
-    measured_totals$net,
-    model_based_2024$net,
-    model_based_2025$net,
-    model_based_2026_h1$net,
-    model_based_2026_projected_remainder$net
-  )
-) |>
-  group_by(year, source) |>
-  summarise(net_uplift = sum(net_uplift), .groups = "drop")
-
-ggplot(
-  cumulative_by_year,
-  aes(x = factor(year), y = net_uplift, fill = source)
-) +
-  geom_col() +
-  scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
-  labs(
-    title = "Cumulative assessed value uplift: 5 to 8 unit rowhomes since ZBR",
-    subtitle = paste0(
-      "Net of market appreciation; 2026 full year projected at ",
-      h1_multiplier,
-      "x H1"
-    ),
-    x = "Permit year",
-    y = "Assessed value uplift",
-    fill = NULL,
-    caption = CAPTION_COE
-  ) +
-  theme_jd(mode = "light")
-```
-
-Adding it all up: since ZBR took effect, mature-neighbourhood 5 to 8 unit rowhomes are estimated to have added **`r label_dollars_adaptive(total_gross_uplift)`** in gross assessed value, or **`r label_dollars_adaptive(total_net_uplift)`** net of general market appreciation, across `r n_2024_all` (2024) + `r n_2025_all` (2025) + `r round(n_2026_projected)` (2026, projected) = `r n_2024_all + n_2025_all + round(n_2026_projected)` permitted projects.
-
-## What this means for property tax
-
-This section zooms in on the 5 to 8 unit rowhome pipeline specifically — the comprehensive, all-category tax figure was already given above (@tbl-comprehensive-infill). Assessed value only matters for the City's budget insofar as it's taxed. I convert the estimated uplift into two figures: an **annual recurring** estimate, at 2026 municipal tax rates, of how much more property tax the 5 to 8 unit rowhome pipeline will generate every year once every project is complete and fully reflected in an assessment roll; and a rougher **cumulative collected so far** estimate that accounts for the fact that most of this pipeline is still under construction or only recently completed.
-
-Completed 5 to 8 unit rowhomes on a single title are typically assessed as "Other Residential", which carries a higher municipal mill rate than the "Residential" class the original house was assessed under, but that split isn't uniform: in the measured cohort, essentially every 7-8 unit building lands in Other Residential, while most 5-6 unit buildings stay Residential. In the measured cohort overall, `r percent(final_cohort |> summarise(p = mean(mill_class_1 == "OTHER RESIDENTIAL")) |> pull(p), accuracy = 1)` of completed properties land in Other Residential; for the model-based portion of the estimate, I apply that same mix separately within the 5-6 and 7-8 unit buckets, rather than one flat rate for every permit regardless of size.
-
-At 2026 municipal tax rates, this pipeline is estimated to add **`r label_dollars_adaptive(annual_tax_uplift_net)`** in property tax every year, net of what general appreciation would have generated anyway (`r label_dollars_adaptive(annual_tax_uplift_gross)` on a gross basis). That's before counting the provincial education levy, which would add roughly another third on top of the municipal portion.
-
-Because most of this pipeline is still ramping up, actual tax collected so far is much lower than that steady-state figure. Comparing each matched property's mid-construction 2025 assessed value to its 2024 baseline and completed 2026 value shows how much of the total uplift typically shows up one year after a permit is issued.
-
-```{r}
-#| label: cumulative-collected
-partial_uplift_share <- final_cohort |>
-  filter(!is.na(value_2025), value_2026 > value_2024) |>
-  mutate(p = (value_2025 - value_2024) / (value_2026 - value_2024)) |>
-  summarise(p = median(p)) |>
-  pull(p) |>
-  pmax(0) |>
-  pmin(1)
-
-# Measured properties use their own exact assessment class; model-based
-# permits use the bucketed blended rate (see all_permits' pred_tax_net_2025/
-# pred_tax_net_2026 columns).
-measured_tax_2025 <- final_cohort |>
-  summarise(
-    tax = sum(
-      net_uplift *
-        if_else(
-          mill_class_1 == "OTHER RESIDENTIAL",
-          municipal_rate("Other Residential", 2025),
-          municipal_rate("Residential", 2025)
-        )
-    )
-  ) |>
-  pull(tax)
-
-measured_tax_2026 <- final_cohort |>
-  summarise(
-    tax = sum(
-      net_uplift *
-        if_else(
-          mill_class_1 == "OTHER RESIDENTIAL",
-          municipal_rate("Other Residential", 2026),
-          municipal_rate("Residential", 2026)
-        )
-    )
-  ) |>
-  pull(tax)
-
-# A property permitted in year Y contributes a partial share of its
-# annual tax uplift in year Y+1, and the full amount from Y+2 on.
-collected_2025 <- partial_uplift_share *
-  (measured_tax_2025 + model_based_2024$tax_net_2025)
-collected_2026 <- (measured_tax_2026 + model_based_2024$tax_net_2026) +
-  partial_uplift_share * model_based_2025$tax_net_2026
-cumulative_collected <- collected_2025 + collected_2026
-```
-
-The median property has captured about `r percent(partial_uplift_share, accuracy = 1)` of its full uplift by the assessment one year after permitting, consistent with most projects still being under construction at that point. Modelling each year's cohort as contributing that partial share in the following year and the full amount from two years out, I estimate Edmonton has collected roughly **`r label_dollars_adaptive(cumulative_collected)`** in incremental property tax from this pipeline across 2025 and 2026 combined, well short of the `r label_dollars_adaptive(annual_tax_uplift_net)`-a-year steady-state run rate established above.
-
-These are estimates, not City budget figures. Assessment growth from new construction doesn't translate one-for-one into new City revenue, since Council sets the mill rate each year based on total budget needs, but new construction is genuinely additional tax base at whatever rate Council sets, distinct from a rate increase on existing properties. This also doesn't account for the cost of servicing new residents, which isn't the subject of this post.
-
-## Where is this happening?
-
-This breakdown covers the 5 to 8 unit rowhome pipeline only — the plex and backyard-home cohorts are too small to support a reliable neighbourhood-level split. That citywide rowhome total is the sum of hundreds of individual redevelopments, concentrated unevenly across mature Edmonton. @tbl-cumulative-selected-neighbourhoods breaks the cumulative estimate down for the same neighbourhoods used in the [Q2 2026 report's selected-neighbourhood table](../q2-building-permits/index.qmd), places that have been prominent in debates about RS Zone infill. Each permit is valued at its actual measured uplift where available, or the model's prediction otherwise, then summed by neighbourhood. This covers every actual permit issued through H1 2026; the projected remainder of 2026 isn't tied to real permits yet, so it's included in the citywide total above but left out of this neighbourhood breakdown.
-
-```{r}
-#| label: cumulative-by-neighbourhood-prep
-#| include: false
-# Each actual permit's uplift: measured where available, model prediction
-# otherwise. The 2026 projected remainder has no real permits to attach
-# to a neighbourhood, so it's excluded here (it's still in the citywide
-# total above). Used by the neighbourhood breakdown below. 5 to 8 unit
-# rowhome pipeline only.
-measured_lookup <- final_cohort |>
-  st_drop_geometry() |>
-  select(
-    permit_row_id,
-    actual_gross = gross_uplift,
-    actual_net = net_uplift,
-    mill_class_1,
-    value_2024,
-    value_2026
-  )
-
-permit_uplift <- all_permits |>
-  select(-value_2024) |>
-  left_join(measured_lookup, by = "permit_row_id") |>
-  mutate(
-    is_measured = !is.na(actual_gross),
-    gross_uplift = coalesce(actual_gross, pred_gross),
-    net_uplift = coalesce(actual_net, pred_net),
-    annual_tax_uplift = if_else(
-      is_measured,
-      if_else(
-        mill_class_1 == "OTHER RESIDENTIAL",
-        municipal_rate("Other Residential", 2026) * value_2026,
-        municipal_rate("Residential", 2026) * value_2026
-      ) -
-        municipal_rate("Residential", 2026) * g * value_2024,
-      pred_tax_net_2026
-    )
-  )
-
-cumulative_by_neighbourhood <- permit_uplift |>
-  mutate(neighbourhood = str_to_title(neighbourhood)) |>
-  group_by(neighbourhood) |>
-  summarise(
-    n_projects = n(),
-    homes_added = sum(units_added),
-    cumulative_gross_uplift = sum(gross_uplift),
-    cumulative_net_uplift = sum(net_uplift),
-    annual_tax_uplift = sum(annual_tax_uplift),
-    .groups = "drop"
-  )
-```
-
-```{r}
-#| label: tbl-cumulative-selected-neighbourhoods
-#| tbl-cap: "Cumulative estimated uplift for selected neighbourhoods, 5 to 8 unit rowhomes, 2024 through H1 2026"
-selected_nbhds <- c(
-  "GLENWOOD",
-  "GROVENOR",
-  "BRITANNIA YOUNGSTOWN",
-  "WESTMOUNT",
-  "MCKERNAN",
-  "BELGRAVIA",
-  "CRESTWOOD",
-  "PARKVIEW"
-)
-
-tibble(neighbourhood = str_to_title(selected_nbhds)) |>
-  left_join(cumulative_by_neighbourhood, by = "neighbourhood") |>
-  replace_na(list(
-    n_projects = 0,
-    homes_added = 0,
-    cumulative_gross_uplift = 0,
-    cumulative_net_uplift = 0,
-    annual_tax_uplift = 0
-  )) |>
-  arrange(neighbourhood) |>
-  gt() |>
+#| label: tbl-comprehensive-infill
+#| tbl-cap: "RS Zone infill uplift, 2024 through H1 2026 (2026 full year projected)"
+comprehensive_summary |>
+  filter(category != "Total") |>
+  gt(rowname_col = "category") |>
   fmt_currency(
-    columns = c(
-      cumulative_gross_uplift,
-      cumulative_net_uplift,
-      annual_tax_uplift
-    ),
-    decimals = 0
+    columns = c(net_uplift, annual_tax_uplift),
+    decimals = 1,
+    scale_by = 1e-6,
+    pattern = "{x}M"
   ) |>
   fmt_integer(columns = c(n_projects, homes_added)) |>
+  grand_summary_rows(
+    fns = "sum",
+    fmt = list(
+      ~ fmt_integer(., columns = c(n_projects, homes_added)),
+      ~ fmt_currency(
+        .,
+        columns = c(net_uplift, annual_tax_uplift),
+        decimals = 1,
+        scale_by = 1e-6,
+        pattern = "{x}M"
+      )
+    )
+  ) |>
   cols_label(
-    neighbourhood = "Neighbourhood",
-    n_projects = "Projects",
+    n_projects = "Lots",
     homes_added = "Homes added",
-    cumulative_gross_uplift = "Cumulative gross uplift",
-    cumulative_net_uplift = "Cumulative net uplift",
-    annual_tax_uplift = "Est. annual municipal tax uplift"
+    net_uplift = "Net value uplift",
+    annual_tax_uplift = "Annual municipal tax uplift"
   ) |>
   tab_header(
-    title = "Cumulative uplift, selected neighbourhoods",
-    subtitle = "5 to 8 unit rowhomes only, 2024 through H1 2026, measured + model-based"
+    title = "RS Zone infill property assessment and municipal tax uplift",
+    subtitle = "2024 through H1 2026 (2026 full year projected)"
   ) |>
   finalize_gt() |>
-  opt_stylize_jd() |>
-  sub_missing()
-```
-
-@tbl-uplift-by-neighbourhood is the same breakdown for every mature neighbourhood with a matching permit, not just the selected set above; use it to look up any specific neighbourhood.
-
-```{r}
-#| label: tbl-uplift-by-neighbourhood
-#| tbl-cap: "Cumulative estimated uplift by neighbourhood, 5 to 8 unit rowhomes, 2024 through H1 2026 (interactive)"
-cumulative_by_neighbourhood |>
-  arrange(desc(annual_tax_uplift)) |>
-  gt() |>
-  fmt_currency(
-    columns = c(
-      cumulative_gross_uplift,
-      cumulative_net_uplift,
-      annual_tax_uplift
-    ),
-    decimals = 0
-  ) |>
-  fmt_integer(columns = c(n_projects, homes_added)) |>
-  cols_label(
-    neighbourhood = "Neighbourhood",
-    n_projects = "Projects",
-    homes_added = "Homes added",
-    cumulative_gross_uplift = "Cumulative gross uplift",
-    cumulative_net_uplift = "Cumulative net uplift",
-    annual_tax_uplift = "Est. annual municipal tax uplift"
-  ) |>
-  tab_header(
-    title = "Cumulative uplift by neighbourhood",
-    subtitle = "5 to 8 unit rowhomes only, 2024 through H1 2026, measured + model-based"
-  ) |>
-  finalize_gt(interactive = TRUE) |>
   opt_stylize_jd()
 ```
+
+That's not insignificant. The infill tax uplift would cover a bunch of the items in the [2026 operating budget](https://www.edmonton.ca/sites/default/files/public-files/documents/2026-approved-operating-budget-april.pdf) that materially improve Edmontonians' quality of life:
+
+- **DATS Service Level ($3.0M)** — DATS (Dedicated Accessible Transit Service) is the door-to-door transit option for Edmontonians who can't use conventional buses or LRT. Demand had outgrown the existing budget; without this funding, the share of trip requests the city could confirm was projected to fall from 98% to 89%, denying an estimated 120,000 rider trips a year.
+- **Community Standards Peace Officers Contingent ($5.8M)** — funds a new 31-person Traffic Safety Team (phased in through 2027) focused on school-zone, speeding, and vehicle-noise enforcement.
+- **Permanent Enhanced Cleaning ($2.7M)** — makes permanent a temporary boost to cleaning of transit stations and vehicles, aimed at rider safety and comfort.
+- **Bus Cleaning Service Delivery Model ($1.2M)** — restores a bus-cleaning budget cut made in 2020, when the City briefly outsourced the work; the outsourcing decision was reversed the next year, but the cut to the cleaning budget itself was never reinstated until now.
+- **Infill Liaison Team ($0.6M)** — reinstates a dedicated team to field infill-related complaints, explain the City's infill policy, and coordinate between departments. A fitting one to fund with infill's own tax revenue.
+- **Facility Maintenance Services – Contract Work Inflation ($0.6M)** — covers inflation-driven cost increases (about 15%) on contracted maintenance work at City Hall, recreation centres, police stations, and libraries.
+
+Alternatively, this infill tax uplift is equivalent to an approximate 0.6% reduction in the property tax rate, which would be a welcome relief for all property owners in Edmonton. As we build more small-scale infill in 2027 and beyond, the tax uplift will continue to grow, further decreasing property taxes for everyone. [Based on $11M for Explore Edmonton [worth 0.5% of property tax rate](https://edmontonjournal.com/news/local-news/explore-edmonton-celebrates-funding-as-city-vies-for-mystery-event)]{.aside}
 
 ```{r}
 #| label: key-facts-validation
 #| include: false
 # Sanity check that the hardcoded Key facts bullets above still match the
 # computed figures, so a future re-render can't silently drift from them.
-n_total_projects <- n_2024_all + n_2025_all + round(n_2026_projected)
 stopifnot(
-  total_net_uplift > 1.1e9,
-  total_net_uplift < 1.4e9,
-  annual_tax_uplift_net > 9e6,
-  annual_tax_uplift_net < 11.5e6,
-  cumulative_collected > 1.5e6,
-  cumulative_collected < 2.5e6,
-  n_total_projects > 750,
-  n_total_projects < 850,
   comprehensive_net_uplift > 1.5e9,
-  comprehensive_net_uplift < 2e9,
-  comprehensive_tax_uplift > 1.1e7,
-  comprehensive_tax_uplift < 1.6e7,
-  length(intersect(rowhome_pipeline$lot_key, plex_pipeline$lot_key)) == 0,
-  length(intersect(rowhome_pipeline$lot_key, backyard_pipeline$lot_key)) == 0,
-  length(intersect(plex_pipeline$lot_key, backyard_pipeline$lot_key)) == 0
+  comprehensive_net_uplift < 1.9e9,
+  comprehensive_tax_uplift > 1.2e7,
+  comprehensive_tax_uplift < 1.5e7
 )
 ```
 
 ## Conclusions
 
-The RS Zone's small-scale infill isn't just adding homes, it's rebuilding the property tax base of neighbourhoods that had been losing population and, with it, tax revenue per hectare of city-maintained infrastructure for decades. Across 5 to 8 unit rowhomes, 2 to 4 unit plexes, and backyard homes, a handful of redevelopments per neighbourhood, concentrated in mature areas that already have the pipes, roads, and schools in place, is already worth more than `r label_dollars_adaptive(comprehensive_tax_uplift)` a year in additional municipal property tax capacity at steady state, on top of the housing it delivers. The 5 to 8 unit rowhome remains the single largest lever on its own, worth more than `r label_dollars_adaptive(annual_tax_uplift_net)` a year of that total — but it's not the whole story.
+The RS Zone's small-scale infill isn't just adding homes, it's increasing the size of the property tax base. A few hundred developments over the past two and a half years, built in mature areas that already have the pipes, roads, and schools in place, is already worth more than `r label_dollars_adaptive(comprehensive_tax_uplift)` a year in additional municipal property tax capacity at steady state. This corresponds to a 0.6% decrease in the property tax rate, which is a meaningful relief for all property owners in Edmonton. And more relief will be on the way as more gets built in 2027 and onwards.
 
-None of this required a subsidy, a grant, or a City-led development. It required removing rules that made this kind of building illegal. If you'd like to help keep it that way, consider joining [Grow Together Edmonton](https://www.growtogetheryeg.com/).
+Now it's up to Council to decide what to do with the ever-growing infill dividend.
+Whether it's used to keep property taxes lower or to increase service levels, the Zoning Bylaw Renewal will continue to pay off for all Edmontonians for years to come.
+If you'd like to help keep it that way, join me at [Grow Together Edmonton](https://www.growtogetheryeg.com/) where we advocate for building more housing options in the places people want to live.
