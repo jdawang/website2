@@ -1,9 +1,9 @@
 ---
-title: "The property tax dividend from Edmonton's RS Zone infill"
-date: "2026-07-12"
+title: "Edmonton's infill property tax dividend"
+date: "2026-07-16"
 author: "Jacob Dawang"
-categories: [housing, edmonton, zoning]
-description: "Redeveloping an old house into a 5-8 unit rowhome, 2-4 unit plex, or backyard home doesn't just add homes, it multiplies the property's assessed value. Here's what all of it is worth to Edmonton's property tax base since the Zoning Bylaw Renewal took effect."
+categories: [housing, edmonton, zoning, property value]
+description: "Every single-detached home that becomes a rowhome, plex, or backyard home multiplies its assessed value. Matching 2024–2026 building permits to City assessment data, I measure that uplift directly and its effect on property tax revenue."
 link-external-newwindow: true
 link-external-icon: false
 execute:
@@ -1419,6 +1419,7 @@ rowhome_totals <- list(net_uplift = rowhome_results$total_net_uplift)
 ```{r}
 #| label: fig-comprehensive-infill
 #| fig-cap: "Net assessed value uplift by small-scale infill category, 2024 through H1 2026 (2026 full year projected)"
+#| classes: "preview-image"
 comprehensive_summary |>
   filter(category != "Total") |>
   mutate(category = fct_reorder(category, net_uplift)) |>
@@ -1478,14 +1479,16 @@ comprehensive_summary |>
   opt_stylize_jd()
 ```
 
-That's not insignificant. The infill tax uplift would cover a bunch of the items in the [2026 operating budget](https://www.edmonton.ca/sites/default/files/public-files/documents/2026-approved-operating-budget-april.pdf) that materially improve Edmontonians' quality of life:
+That's not insignificant. The infill tax uplift would cover all of the following items in the [2026 operating budget](https://www.edmonton.ca/sites/default/files/public-files/documents/2026-approved-operating-budget-april.pdf) that materially improve Edmontonians' quality of life:
 
-- **DATS Service Level ($3.0M)** — DATS (Dedicated Accessible Transit Service) is the door-to-door transit option for Edmontonians who can't use conventional buses or LRT. Demand had outgrown the existing budget; without this funding, the share of trip requests the city could confirm was projected to fall from 98% to 89%, denying an estimated 120,000 rider trips a year.
-- **Community Standards Peace Officers Contingent ($5.8M)** — funds a new 31-person Traffic Safety Team (phased in through 2027) focused on school-zone, speeding, and vehicle-noise enforcement.
-- **Permanent Enhanced Cleaning ($2.7M)** — makes permanent a temporary boost to cleaning of transit stations and vehicles, aimed at rider safety and comfort.
-- **Bus Cleaning Service Delivery Model ($1.2M)** — restores a bus-cleaning budget cut made in 2020, when the City briefly outsourced the work; the outsourcing decision was reversed the next year, but the cut to the cleaning budget itself was never reinstated until now.
+- **Bus Service Growth Operating Impacts ($7.4M)** — the ongoing annual cost of converting three On-Demand Transit zones to conventional fixed-route bus service, using 25 new buses and adding 62,500 annual service hours. This is the ongoing, permanent cost once the new routes launch in 2027, not the smaller, partial-year cost in 2026.
+- **DATS Service Level ($3.0M)** — DATS (Dedicated Accessible Transit Service) is the door-to-door transit option for Edmontonians who can't use conventional buses or LRT. Demand had outgrown the existing budget. Without this funding, the share of trip requests the city could confirm was projected to fall from 98% to 89%, denying an estimated 120,000 rider trips a year.
+- **Spring Sweep equipment ($1.1M)** — restores funding for the leased equipment used in Edmonton's annual spring street sweep, which clears the winter's accumulated sand and grit off roads by June 1 each year.
+- **Transit Fleet Maintenance ($1.1M)** — covers higher-than-budgeted cost increases (about 22%) on the parts and materials needed to keep ETS's 900+ buses on the road, including legislated preventative maintenance and mid-life refurbishment.
+- **Facility Maintenance Services ($0.6M)** — covers inflation-driven cost increases (about 15%) on contracted maintenance work at City Hall, recreation centres, police stations, and libraries.
 - **Infill Liaison Team ($0.6M)** — reinstates a dedicated team to field infill-related complaints, explain the City's infill policy, and coordinate between departments. A fitting one to fund with infill's own tax revenue.
-- **Facility Maintenance Services – Contract Work Inflation ($0.6M)** — covers inflation-driven cost increases (about 15%) on contracted maintenance work at City Hall, recreation centres, police stations, and libraries.
+
+Add those up and it comes to $13.8M, just under the $14.0M a year in infill tax uplift.
 
 Alternatively, this infill tax uplift is equivalent to an approximate 0.6% reduction in the property tax rate, which would be a welcome relief for all property owners in Edmonton. As we build more small-scale infill in 2027 and beyond, the tax uplift will continue to grow, further decreasing property taxes for everyone. [Based on $11M for Explore Edmonton [worth 0.5% of property tax rate](https://edmontonjournal.com/news/local-news/explore-edmonton-celebrates-funding-as-city-vies-for-mystery-event)]{.aside}
 
