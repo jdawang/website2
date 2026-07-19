@@ -848,8 +848,8 @@ gt(actual_2024_summary, rowname_col = "status") |>
     total_gross_uplift = "Total gross uplift"
   ) |>
   tab_header(
-    title = "2024 cohort, actual gross uplift observed so far",
-    subtitle = "5+ unit rowhomes; no extrapolation model applied"
+    title = "Observed gross uplift",
+    subtitle = "5+ unit rowhomes, 2024 cohort"
   ) |>
   finalize_gt() |>
   opt_stylize_jd()
@@ -1429,7 +1429,7 @@ Of the `r label_dollars_adaptive(comprehensive_net_uplift)` total, `r label_doll
 
 ```{r}
 #| label: fig-comprehensive-infill
-#| fig-cap: "Net assessed value uplift by small-scale infill category, 2024 through H1 2026 (2026 full year projected)"
+#| fig-cap: "Net assessed value uplift by small-scale infill category, 2024 through H1 2026 building permits (2026 full year projected)"
 #| classes: "preview-image"
 comprehensive_summary |>
   filter(category != "Total") |>
@@ -1452,7 +1452,7 @@ The corresponding tax revenue, in @tbl-comprehensive-infill, comes to an estimat
 
 ```{r}
 #| label: tbl-comprehensive-infill
-#| tbl-cap: "RS Zone infill uplift, 2024 through H1 2026 (2026 full year projected)"
+#| tbl-cap: "RS Zone infill uplift, 2024 through H1 2026 building permits (2026 full year projected)"
 comprehensive_summary |>
   filter(category != "Total") |>
   gt(rowname_col = "category") |>
@@ -1484,7 +1484,7 @@ comprehensive_summary |>
   ) |>
   tab_header(
     title = "RS Zone infill property assessment and municipal tax uplift",
-    subtitle = "2024 through H1 2026 (2026 full year projected)"
+    subtitle = "2024 through H1 2026 building permits (2026 full year projected)"
   ) |>
   finalize_gt() |>
   opt_stylize_jd()
