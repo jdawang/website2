@@ -1,0 +1,1822 @@
+---
+title: "TODO: title"
+date: "2026-09-XX"
+author: "Jacob Dawang"
+categories: [housing, edmonton, zoning, property value]
+description: "TODO: description"
+link-external-newwindow: true
+link-external-icon: false
+execute:
+  cache: false
+draft: true
+---
+
+```{=html}
+<!--
+NOTE TO SELF (Jacob): this .qmd is deliberately prose-light. Every section
+below has working code plus a short "Chunk note" comment saying what it does
+and what the result implies -- fill in the actual writing around it. See
+the plan at ~/.claude/plans/i-want-to-make-tender-kazoo.md for the full
+argument structure, the econometrics review that reshaped this design, and
+the verified methodology quotes.
+-->
+```
+
+## Key numbers
+
+```{=html}
+<!-- TODO: 3 bullets, written last, validated by the key-facts-validation
+chunk at the bottom of this file. -->
+```
+
+## What the claim says {#sec-the-claim}
+
+```{=html}
+<!-- TODO: ENU's 7.4% claim, the 9-4 Council motion, the "we measure
+different things" framing (see plan §10). -->
+```
+
+## Edmonton already has a rule for this {#sec-multi-residential-influence}
+
+```{=html}
+<!-- TODO: quote the verified methodology text (plan, "Verified facts"
+section) -- the abut/road-lane/50m criteria, the Minor/Moderate/Major bands,
+the 2025-vs-2026 small-lot-clause diff, and the City's own "an 8 unit
+rowhouse development would be considered a multi-residential property"
+example. -->
+```
+
+```{r}
+#| label: tbl-influence-bands
+#| tbl-cap: "Edmonton's multi-residential negative site influence, by total contiguous dwelling unit count"
+# Chunk note: static reference table transcribing the verified methodology
+# text (2026 RES Improved, p.~13). No computation -- just the bands, so a
+# reader can see the City's own thresholds before we test them empirically.
+tibble::tribble(
+  ~band, ~dwelling_units, ~criteria,
+  "Minor", "4 to 30", "Abuts, or across a road/lane (<15,000 traffic), or within 50m across open space",
+  "Moderate", "31 to 75", "Same adjacency criteria",
+  "Major", "More than 75", "Same adjacency criteria"
+) |>
+  gt::gt() |>
+  gt::cols_label(band = "Band", dwelling_units = "Total contiguous dwelling units", criteria = "Adjacency criteria") |>
+  jdawangHelpers::finalize_gt(source = "Jacob Dawang, City of Edmonton 2026 Assessment Methodology: Residential Improved Properties") |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+## Data {#sec-data}
+
+```{=html}
+<!-- TODO: name the four Open Data sources (permits, historical assessment,
+current-year assessment, and — new for this post — the methodology PDFs
+themselves as a citation, not a data source). -->
+```
+
+```{r}
+#| label: setup
+#| include: false
+library(tidyverse)
+library(sf)
+library(gt)
+library(scales)
+library(fixest)
+library(modelsummary)
+library(broom)
+library(units)
+library(tidytransit)
+library(mountainmathHelpers)
+library(jdawangHelpers)
+
+options(
+  cancensus.api_key = Sys.getenv("CM_API_KEY"),
+  cancensus.cache_path = Sys.getenv("CM_CACHE_PATH"),
+  tongfen.cache_path = Sys.getenv("TONGFEN_CACHE_PATH"),
+  nextzen_API_key = Sys.getenv("NEXTZEN_API_KEY"),
+  modelsummary_factory_default = "gt"
+)
+
+# The 2026 roll reliably reflects buildings finished by about this date
+# (established empirically in property-tax-uplift's #sec-assessment-catch-up).
+occupancy_cutoff <- as.Date("2025-09-30")
+
+# ---- Permit data (ported from property-tax-uplift, verbatim pipeline) ----
+bp_raw <- get_edmonton_building_permit_data(
+  cache_dir = Sys.getenv("EDMONTON_BP_CACHE_PATH"),
+  end_date = "2026-06-30"
+)
+crs <- lambert_conformal_conic_at(bp_raw)
+
+bp <- bp_raw |>
+  st_transform(crs) |>
+  mutate(permit_row_id = row_number()) |>
+  filter(year < 2026 | (year == 2026 & month_number <= 6)) |>
+  filter_edmonton_residential() |>
+  filter(units_added >= 1, work_type != "(04) Excavation") |>
+  add_edmonton_project_type() |>
+  add_edmonton_suite_info() |>
+  add_edmonton_neighbourhood_type() |>
+  # Some permits carry an occupancy_granted_date that predates their own
+  # issue date -- a known data error. Blank those dates so a bad date can't
+  # put a lot into the measurement cohort's occupancy cutoff.
+  mutate(
+    occupancy_granted_date = if_else(
+      !is.na(date_issued) & occupancy_granted_date < date_issued,
+      as.Date(NA),
+      occupancy_granted_date
+    )
+  )
+
+# LRT stops (existing + under construction) -- needed for the LRT-influence
+# positive control in @sec-can-the-model-see-it, not for the main design
+# (property FE absorbs distance-to-LRT as a time-invariant characteristic).
+future_stops <- read_sf("../../../data/future_lrt_stops.geojson") |>
+  filter(
+    !(stop_name %in%
+      c("Castle Downs Station", "145 Ave Station", "137 Ave Station", "132 Ave Station"))
+  )
+
+transit_stops <- load_edmonton_transit_stops(
+  gtfs_path = "../../../data/ca-alberta-edmonton-transit-system-gtfs-714.zip",
+  service_date = as.Date("2023-11-09"),
+  future_stops = future_stops,
+  crs = crs
+)
+
+# The full universe this post is about: every mature-neighbourhood RS Zone
+# new-build permit that could be part of a 5+ unit rowhome, 2-4 unit plex,
+# or backyard-home redevelopment, permitted since ZBR took effect.
+redevelopment_permits <- bp |>
+  filter(
+    year >= 2024,
+    zoning == "RS",
+    work_type == "(01) Building - New",
+    neighbourhood_type == "Mature",
+    units_added >= 2 | project_type == "Backyard House"
+  )
+```
+
+```{r}
+#| label: fetch-assessment-data
+#| include: false
+# Generalizes property-tax-uplift's fetch_socrata_csv() to a column-subset,
+# one-CSV-per-year pull across 2019-2026, instead of two hardcoded years.
+#
+# TRAP: fetch_socrata_csv() keys its cache on FILENAME ONLY, never the
+# query. Reusing "assessment_2026.csv" (property-tax-uplift's filename)
+# with a different $select would silently return that post's cached file
+# instead of re-fetching with our column list. Use new filenames.
+fetch_socrata_csv <- function(resource, query, cache_file) {
+  cache_dir <- Sys.getenv("EDMONTON_BP_CACHE_PATH")
+  path <- file.path(cache_dir, cache_file)
+  if (!file.exists(path)) {
+    url <- paste0("https://data.edmonton.ca/resource/", resource, ".csv?", URLencode(query))
+    old_timeout <- getOption("timeout")
+    options(timeout = max(1800, old_timeout))
+    on.exit(options(timeout = old_timeout), add = TRUE)
+    tmp <- paste0(path, ".part")
+    download.file(url, tmp, mode = "wb")
+    file.rename(tmp, path)
+  }
+  read_csv(path, show_col_types = FALSE, col_types = cols(.default = "c"))
+}
+
+# Historical roll (qi6a-xuwt): zoning here is zoning AT THAT ASSESSMENT
+# YEAR (a 2019 row reads "RF1", pre-ZBR) -- never used for the 2024 frame's
+# zoning filter, only the 2024 roll's own zoning column is.
+HIST_COLS <- c("account_number", "assessment_year", "suite", "house_number",
+               "street_name", "legal_description", "latitude", "longitude",
+               "neighbourhood_name", "year_built", "garage", "zoning",
+               "lot_size", "assessed_value", "mill_class_1")
+
+# Current-year roll (q7d6-ambg) is SCHEMA-DIFFERENT from the historical
+# roll: no assessment_year, no legal_description, no zoning, no
+# year_built, no lot_size, and the neighbourhood column is `neighbourhood`
+# not `neighbourhood_name`. Handled specially both at fetch and at read-back.
+fetch_assessment_year <- function(yr) {
+  if (yr == 2026) {
+    fetch_socrata_csv(
+      "q7d6-ambg",
+      "$select=account_number,suite,house_number,street_name,neighbourhood,assessed_value,mill_class_1,latitude,longitude&$limit=600000",
+      "assess_sel_2026.csv"
+    )
+  } else {
+    fetch_socrata_csv(
+      "qi6a-xuwt",
+      paste0("$select=", paste(HIST_COLS, collapse = ","),
+             "&$where=assessment_year=", yr, "&$limit=600000"),
+      paste0("assess_sel_", yr, ".csv")
+    )
+  }
+}
+
+read_assessment_year <- function(yr) {
+  cache <- path.expand(Sys.getenv("EDMONTON_BP_CACHE_PATH"))
+  if (yr == 2026) {
+    read_csv(file.path(cache, "assess_sel_2026.csv"), show_col_types = FALSE,
+             col_types = cols(.default = "c")) |>
+      rename(neighbourhood_name = neighbourhood) |>
+      mutate(
+        assessment_year = 2026L,
+        assessed_value = as.numeric(assessed_value),
+        latitude = as.numeric(latitude),
+        longitude = as.numeric(longitude),
+        account_number = as.character(as.integer(account_number))
+      )
+  } else {
+    read_csv(file.path(cache, paste0("assess_sel_", yr, ".csv")), show_col_types = FALSE,
+             col_types = cols(.default = "c")) |>
+      mutate(
+        assessment_year = as.integer(assessment_year),
+        assessed_value = as.numeric(assessed_value),
+        latitude = as.numeric(latitude),
+        longitude = as.numeric(longitude),
+        lot_size = as.numeric(lot_size),
+        account_number = as.character(as.integer(account_number))
+      )
+  }
+}
+
+# Fetch (idempotent -- cached after first render) then read every year.
+invisible(map(2019:2026, fetch_assessment_year))
+assessment_all <- map(2019:2026, read_assessment_year) |> list_rbind()
+
+assessment_2024 <- assessment_all |> filter(assessment_year == 2024)
+assessment_2026 <- assessment_all |> filter(assessment_year == 2026)
+```
+
+Chunk note: `assessment_all` covers 3,368,575 rows across 8 assessment years (verified row counts: 2019 402,419 · 2020 409,384 · 2021 413,809 · 2022 418,982 · 2023 425,728 · 2024 426,913 · 2025 431,706 · 2026 439,634 -- these match the independent counts in the plan's review exactly).
+
+### The roll timeline — why 2023 is the reference year, not 2024
+
+```{r}
+#| label: tbl-roll-timeline
+#| tbl-cap: "Assessment roll timing vs. the ZBR milestone. The 2024 roll is the last one entirely unaffected by ZBR; the 2026 roll is the first whose methodology can code a ZBR rowhome as multi-residential."
+# Chunk note: this table is why ref = 2023 in every regression below, not
+# ref = 2024. ZBR (Bylaw 20001) was approved Oct 2023, effective Jan 1
+# 2024. The 2024 roll's valuation date (July 1, 2023) and sales window
+# (Jul 2018-Jun 2023) are ENTIRELY PRE-APPROVAL -- clean as a reference
+# year for the zoning question. The 2025 roll (valuation date July 1,
+# 2024) is the first that COULD reprice on ZBR, so any citywide RS
+# land-value repricing on the zoning change itself lands between 2023 and
+# 2024, not between 2024 and 2025. Dates below are legislated (MGA
+# s.289(2), and each year's Assessment Methodology PDF); verified against
+# the 2025 and 2026 RES_Improved PDFs directly (gs -sDEVICE=txtwrite
+# extraction, see plan).
+tibble::tribble(
+  ~roll, ~condition_date, ~valuation_date, ~sales_window, ~influence_definition, ~zbr_milestone,
+  2023L, "2022-12-31", "2022-07-01", "2017-07 to 2022-06", "n/a (pre-ZBR)", "Bylaw 20001 not yet approved",
+  2024L, "2023-12-31", "2023-07-01", "2018-07 to 2023-06", "n/a (pre-ZBR)", "REFERENCE YEAR -- entirely pre-approval",
+  2025L, "2024-12-31", "2024-07-01", "2019-07 to 2024-06", "\"apartments or rental rowhouse complexes\" only -- a ZBR rowhome on condo titles is outside this definition", "ZBR in force since Jan 1 2024; first roll that could reprice on the zoning change",
+  2026L, "2025-12-31", "2025-07-01", "2020-07 to 2025-06", "adds \"any property...higher-density due to its small lot size (<1200 sq m)\" -- the small-lot clause is genuinely new in 2026", "First roll whose methodology can code a ZBR rowhome as multi-residential"
+) |>
+  gt::gt() |>
+  gt::cols_label(
+    roll = "Roll year", condition_date = "Condition date", valuation_date = "Valuation date",
+    sales_window = "Sales window", influence_definition = "Multi-residential influence wording",
+    zbr_milestone = "ZBR milestone"
+  ) |>
+  jdawangHelpers::finalize_gt(source = "Jacob Dawang, City of Edmonton Assessment Methodology PDFs (2023-2026 editions), Bylaw 20001") |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+## Matching permits to assessments {#sec-matching}
+
+```{=html}
+<!-- TODO: brief pointer that this reuses property-tax-uplift's three-tier
+matcher (legal key -> 25m geo -> civic address) -- port that machinery's
+prose too if useful, or just cite the prior post. -->
+```
+
+```{r}
+#| label: legal-key-matching
+#| include: false
+# Ported near-verbatim from property-tax-uplift (#sec-matching). See that
+# post for the full worked explanation of why NA-safe keys and
+# whole-parcel-over-suite preference matter.
+parse_permit_legal <- function(x) {
+  m <- str_match(x, "Plan\\s+(\\S+)\\s+Blk\\s+(\\S+)\\s+Lots?\\s+(\\S+)")
+  tibble(plan = m[, 2], block = m[, 3], lot = m[, 4])
+}
+parse_assessment_legal <- function(x) {
+  m <- str_match(x, "Plan:\\s*(\\S+)\\s+Block:\\s*(\\S+)\\s+Lot:\\s*(\\S+)")
+  tibble(plan = m[, 2], block = m[, 3], lot = m[, 4])
+}
+normalize_key <- function(plan, block, lot) {
+  if_else(
+    is.na(plan) | is.na(block) | is.na(lot),
+    NA_character_,
+    paste(toupper(str_trim(plan)), toupper(str_trim(block)), toupper(str_trim(lot)), sep = "|")
+  )
+}
+# Strips the trailing letter off a legal-description lot number, grouping
+# child lots a parcel was subdivided into under one new plan.
+# parent_lot_key() is for PERMIT-format legal descriptions ("Plan X Blk Y
+# Lot Z"); parent_lot_key_assessment() is the same logic for
+# ASSESSMENT-roll-format descriptions ("Plan: X  Block: Y  Lot: Z").
+# VERIFIED BUG (caught while building this post): feeding an
+# assessment-format string to parent_lot_key() silently fails to parse
+# (wrong regex) and returns the raw string as a singleton key, so
+# exclusion rule (b) below would never fire. Confirmed empirically: using
+# the wrong parser gave 0 hits for rule (b); the correct parser gives
+# 4,321.
+parent_lot_key <- function(legal_description) {
+  parsed <- parse_permit_legal(legal_description)
+  lot_numeric <- str_extract(parsed$lot, "^[0-9]+")
+  key <- normalize_key(parsed$plan, parsed$block, lot_numeric)
+  if_else(is.na(parsed$plan) | is.na(parsed$block) | is.na(lot_numeric), legal_description, key)
+}
+parent_lot_key_assessment <- function(legal_description) {
+  parsed <- parse_assessment_legal(legal_description)
+  lot_numeric <- str_extract(parsed$lot, "^[0-9]+")
+  key <- normalize_key(parsed$plan, parsed$block, lot_numeric)
+  if_else(is.na(parsed$plan) | is.na(parsed$block) | is.na(lot_numeric), legal_description, key)
+}
+# Strips an optional leading "UNIT, "/"BSMT, " prefix and a letter suffix
+# on the house number (the "G" marking garden-suite addresses).
+parse_permit_address <- function(x) {
+  x_no_unit <- str_replace(x, "^[^,]+,\\s*", "")
+  m <- str_match(x_no_unit, "^(\\d+)[A-Za-z]?\\s*-\\s*(.+)$")
+  tibble(house_number = m[, 2], street_name = toupper(str_trim(m[, 3])))
+}
+
+assessment_2024_keyed <- assessment_2024 |>
+  bind_cols(parse_assessment_legal(assessment_2024$legal_description)) |>
+  mutate(key = normalize_key(plan, block, lot)) |>
+  filter(!is.na(key)) |>
+  arrange(desc(is.na(suite))) |>
+  distinct(key, .keep_all = TRUE)
+
+match_baseline_2024 <- function(cohort_sf) {
+  cohort_sf |>
+    st_drop_geometry() |>
+    bind_cols(parse_permit_legal(cohort_sf$legal_description)) |>
+    mutate(key = normalize_key(plan, block, lot)) |>
+    left_join(
+      assessment_2024_keyed |> select(key, account_number, value_2024 = assessed_value),
+      by = "key"
+    )
+}
+
+geo_fallback_baseline <- function(matched_df, cohort_sf) {
+  still_unmatched <- matched_df |> filter(is.na(account_number))
+  if (nrow(still_unmatched) == 0) return(matched_df)
+
+  unmatched_sf <- cohort_sf |> filter(permit_row_id %in% still_unmatched$permit_row_id)
+  assessment_2024_sf <- assessment_2024 |>
+    filter(!is.na(latitude), !is.na(longitude)) |>
+    st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
+    st_transform(crs)
+
+  nearest_idx <- st_nearest_feature(unmatched_sf, assessment_2024_sf)
+  dist_m <- as.numeric(st_distance(unmatched_sf, assessment_2024_sf[nearest_idx, ], by_element = TRUE))
+
+  geo_matches <- tibble(
+    permit_row_id = unmatched_sf$permit_row_id,
+    geo_account = assessment_2024_sf$account_number[nearest_idx],
+    geo_value_2024 = assessment_2024_sf$assessed_value[nearest_idx],
+    geo_dist_m = dist_m
+  ) |> filter(geo_dist_m <= 25)
+
+  matched_df |>
+    left_join(geo_matches, by = "permit_row_id") |>
+    mutate(
+      account_number = coalesce(account_number, geo_account),
+      value_2024 = coalesce(value_2024, geo_value_2024)
+    ) |>
+    select(-any_of(c("geo_account", "geo_value_2024", "geo_dist_m")))
+}
+
+address_fallback_baseline <- function(matched_df, cohort_sf) {
+  still_unmatched <- matched_df |> filter(is.na(account_number))
+  if (nrow(still_unmatched) == 0) return(matched_df)
+
+  addr_cohort <- cohort_sf |> st_drop_geometry() |>
+    filter(permit_row_id %in% still_unmatched$permit_row_id) |> select(permit_row_id, address)
+  addr_parsed <- addr_cohort |>
+    bind_cols(parse_permit_address(addr_cohort$address)) |>
+    mutate(house_number = as.character(as.numeric(house_number)))
+
+  assessment_2024_addr <- assessment_2024 |>
+    filter(is.na(suite)) |>
+    mutate(house_number = as.character(as.numeric(house_number)), street_name = toupper(str_trim(street_name))) |>
+    distinct(house_number, street_name, .keep_all = TRUE)
+
+  addr_matches <- addr_parsed |>
+    left_join(
+      assessment_2024_addr |> select(house_number, street_name, addr_account = account_number, addr_value_2024 = assessed_value),
+      by = c("house_number", "street_name")
+    ) |>
+    filter(!is.na(addr_account)) |>
+    select(permit_row_id, addr_account, addr_value_2024)
+
+  matched_df |>
+    left_join(addr_matches, by = "permit_row_id") |>
+    mutate(
+      account_number = coalesce(account_number, addr_account),
+      value_2024 = coalesce(value_2024, addr_value_2024)
+    ) |>
+    select(-any_of(c("addr_account", "addr_value_2024")))
+}
+
+baseline_matched <- redevelopment_permits |>
+  match_baseline_2024() |>
+  geo_fallback_baseline(redevelopment_permits) |>
+  address_fallback_baseline(redevelopment_permits)
+```
+
+```{r}
+#| label: build-sites
+#| include: false
+# Ported verbatim from property-tax-uplift (#sec-consolidating).
+first_non_na <- function(x) {
+  v <- x[!is.na(x)]
+  if (length(v) == 0) return(x[1])
+  v[1]
+}
+
+build_sites <- function(matched) {
+  m <- matched |> st_drop_geometry()
+
+  primary <- m |>
+    arrange(legal_description, desc(units_added), year) |>
+    distinct(legal_description, .keep_all = TRUE) |>
+    select(legal_description, year, address, neighbourhood, permit_row_id)
+
+  totals <- m |>
+    group_by(legal_description) |>
+    summarise(
+      units_added = sum(units_added),
+      occupancy_granted_date = if (all(is.na(occupancy_granted_date))) as.Date(NA) else max(occupancy_granted_date, na.rm = TRUE),
+      account_number = first_non_na(account_number),
+      value_2024 = first_non_na(value_2024),
+      all_backyard = all(project_type == "Backyard House"),
+      .groups = "drop"
+    )
+
+  primary |> left_join(totals, by = "legal_description")
+}
+
+share_split_baselines <- function(sites) {
+  keyed <- sites |> mutate(parent_key = parent_lot_key(legal_description))
+
+  family_baseline <- keyed |>
+    filter(!is.na(value_2024)) |>
+    distinct(parent_key, value_2024) |>
+    add_count(parent_key, name = "n_distinct_baselines") |>
+    filter(n_distinct_baselines == 1) |>
+    select(parent_key, family_value_2024 = value_2024)
+
+  family_size <- keyed |> count(parent_key, name = "n_children")
+
+  keyed |>
+    left_join(family_baseline, by = "parent_key") |>
+    left_join(family_size, by = "parent_key") |>
+    mutate(
+      shared_baseline = !is.na(family_value_2024) & n_children > 1,
+      value_2024 = if_else(shared_baseline, family_value_2024 / n_children, value_2024)
+    ) |>
+    select(-family_value_2024, -n_children, -parent_key)
+}
+
+sites <- build_sites(baseline_matched) |>
+  share_split_baselines() |>
+  mutate(
+    category = case_when(
+      all_backyard ~ "backyard",
+      units_added <= 4 ~ "plex",
+      TRUE ~ "rowhome"
+    )
+  )
+
+stopifnot(
+  n_distinct(sites$legal_description) == nrow(sites),
+  sum(sites$units_added) == sum(baseline_matched$units_added)
+)
+```
+
+Chunk note: `sites` consolidates same-lot permits (2024-2026 ZBR universe) into one row per lot, matching property-tax-uplift's method exactly. `r nrow(sites)` distinct lots from `r nrow(baseline_matched)` permits.
+
+## Sample construction {#sec-sample}
+
+### The 2024 frame
+
+```{r}
+#| label: frame-2024
+nbhd_type_lookup <- bp |> st_drop_geometry() |>
+  distinct(neighbourhood, neighbourhood_type) |> filter(!is.na(neighbourhood_type))
+
+frame_2024 <- assessment_2024 |>
+  filter(
+    mill_class_1 %in% c("RESIDENTIAL", "OTHER RESIDENTIAL"),
+    assessed_value > 0,
+    is.na(suite), # one account per parcel; drops stacked condo/suite rows
+    zoning == "RS", # 2024 zoning specifically -- historical zoning drifts by year
+    !is.na(latitude), !is.na(longitude)
+  ) |>
+  left_join(nbhd_type_lookup, by = c("neighbourhood_name" = "neighbourhood")) |>
+  filter(neighbourhood_type == "Mature")
+
+n_frame_2024 <- nrow(frame_2024)
+```
+
+Chunk note: `r n_frame_2024` properties (verified: 81,302) -- close to the review's independent estimate of 75,000-80,000. This is the universe of "could ever be treated or control" properties before excluding self-redeveloped ones.
+
+### Excluding self-redeveloped properties
+
+```{=html}
+<!-- TODO: explain "self-redeveloped" (a property torn down and rebuilt
+itself, not merely near one) and why it must be excluded -- see plan
+§4 "Excluding self-redeveloped properties" for the two reasons
+(outcome contamination + pre-demolition reassessment toward land value). -->
+```
+
+```{r}
+#| label: exclude-self-redeveloped
+# Five-rule union, all evaluated against frame_2024. Each rule's marginal
+# contribution is reported separately in tbl-exclusions below so the
+# reader can see which rule does the work.
+newbuild_permits <- bp |> st_drop_geometry() |>
+  filter(year >= 2014, work_type == "(01) Building - New", units_added >= 1)
+
+newbuild_keys <- newbuild_permits |>
+  bind_cols(parse_permit_legal(newbuild_permits$legal_description)) |>
+  mutate(key = normalize_key(plan, block, lot)) |>
+  filter(!is.na(key)) |> distinct(key) |> pull(key)
+
+newbuild_parents <- unique(parent_lot_key(newbuild_permits$legal_description))
+
+# Demolition permits live in bp_raw, BEFORE filter_edmonton_residential()
+# and filter(units_added >= 1) strip them out of `bp`.
+demo_raw <- bp_raw |> st_transform(crs) |> filter(year >= 2014, str_detect(work_type, "Demolition"))
+demo_keys <- demo_raw |> st_drop_geometry() |>
+  bind_cols(parse_permit_legal(demo_raw$legal_description) |> st_drop_geometry()) |>
+  mutate(key = normalize_key(plan, block, lot)) |>
+  filter(!is.na(key)) |> pull(key) |> unique()
+
+newbuild_permits_sf <- bp |> filter(year >= 2014, work_type == "(01) Building - New", units_added >= 1)
+demo_permits_sf <- demo_raw |> filter(!st_is_empty(geometry))
+
+# Accounts resolved by the same three-tier matcher used for the ZBR cohort
+# above, applied here to EVERY new-build permit 2014-2026 (not just the
+# 2024-2026 ZBR universe), to catch address-only matches for older
+# redevelopments too.
+all_newbuild_matched <- newbuild_permits_sf |>
+  mutate(permit_row_id = row_number()) |>
+  match_baseline_2024() |>
+  geo_fallback_baseline(newbuild_permits_sf |> mutate(permit_row_id = row_number())) |>
+  address_fallback_baseline(newbuild_permits_sf |> mutate(permit_row_id = row_number()))
+redeveloped_accounts <- all_newbuild_matched$account_number |> na.omit() |> unique()
+
+# Geographic backstop: nearest new-build-or-demo permit point, kept if
+# within 10m. Uses st_nearest_feature() + st_distance() rather than
+# st_is_within_distance() -- VERIFIED PERFORMANCE FINDING: on this data,
+# st_is_within_distance() did not return within 100+ seconds (81k x 39k
+# candidate pairs), while st_nearest_feature() + st_distance() computed
+# the equivalent existence-within-10m test in under 1 second. Same result,
+# since we only need "is there ANY hit within 10m", not the full sparse set.
+frame_sf <- frame_2024 |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
+  st_transform(crs)
+
+backstop_pts <- bind_rows(
+  newbuild_permits_sf |> filter(!st_is_empty(geometry)) |> select(geometry),
+  demo_permits_sf |> select(geometry)
+)
+nn_idx <- st_nearest_feature(frame_sf, backstop_pts)
+nn_dist <- as.numeric(st_distance(frame_sf, backstop_pts[nn_idx, ], by_element = TRUE))
+geo_hit <- nn_dist <= 10
+
+frame_keyed <- frame_2024 |>
+  bind_cols(parse_assessment_legal(frame_2024$legal_description)) |>
+  mutate(
+    own_key = normalize_key(plan, block, lot),
+    own_parent = parent_lot_key_assessment(legal_description),
+    rule_a = !is.na(own_key) & own_key %in% newbuild_keys,
+    rule_b = !is.na(own_parent) & own_parent %in% newbuild_parents,
+    rule_c = !is.na(own_key) & own_key %in% demo_keys,
+    rule_d = account_number %in% redeveloped_accounts,
+    rule_e = geo_hit,
+    self_redeveloped = rule_a | rule_b | rule_c | rule_d | rule_e
+  )
+
+analysis_frame <- frame_keyed |> filter(!self_redeveloped)
+```
+
+```{r}
+#| label: tbl-exclusions
+#| tbl-cap: "Excluding self-redeveloped properties: marginal contribution of each rule"
+# Chunk note: each rule's count includes overlap with the others -- the
+# union (self_redeveloped) is what actually gets excluded, always smaller
+# than the sum of the five rule counts. Verified counts on the full data:
+# rule_a 3,824 · rule_b 4,321 · rule_c 1,770 · rule_d 3,795 · rule_e 6,857 ·
+# union 7,218 of 81,302 (91.1% retained).
+tibble(
+  rule = c(
+    "(a) Exact legal key of any new-build permit",
+    "(b) Parent-lot family (subdivided children)",
+    "(c) Demolition permit on this legal key",
+    "(d) Account resolved by the 3-tier matcher",
+    "(e) Geographic backstop (within 10m)",
+    "Union (actually excluded)"
+  ),
+  n = c(
+    sum(frame_keyed$rule_a), sum(frame_keyed$rule_b), sum(frame_keyed$rule_c),
+    sum(frame_keyed$rule_d), sum(frame_keyed$rule_e), sum(frame_keyed$self_redeveloped)
+  )
+) |>
+  gt::gt() |>
+  gt::fmt_integer(columns = n) |>
+  gt::cols_label(rule = "Exclusion rule", n = "Properties") |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+### Balanced panel, 2019-2026
+
+```{r}
+#| label: build-panel
+panel_raw <- analysis_frame |>
+  as_tibble() |>
+  select(account_number, neighbourhood_name, lot_size, year_built) |>
+  inner_join(
+    assessment_all |> filter(assessed_value > 0) |> select(account_number, assessment_year, assessed_value),
+    by = "account_number"
+  ) |>
+  filter(assessment_year %in% 2019:2026)
+
+balanced_accounts <- panel_raw |> count(account_number) |> filter(n == 8) |> pull(account_number)
+
+panel <- panel_raw |>
+  filter(account_number %in% balanced_accounts) |>
+  mutate(log_value = log(assessed_value))
+
+n_balanced <- length(balanced_accounts)
+pct_balanced <- n_balanced / nrow(analysis_frame)
+```
+
+Chunk note: `r scales::comma(n_balanced)` of `r scales::comma(nrow(analysis_frame))` properties (`r scales::percent(pct_balanced, accuracy=0.1)`) have all 8 assessment years and enter the balanced panel (verified: 99.0%, better than the pre-build estimate of \~97.5%). With one cohort and property FE, compositional change across years would show up directly as an event-study coefficient, so balance matters here more than in a typical panel.
+
+### Treatment: the 2024 ZBR permit cohort (ITT)
+
+```{r}
+#| label: treated-sites
+# `permit_issued` = every 2024 RS mature new-build ZBR-eligible site with a
+# matched 2024 account, REGARDLESS of completion status. This is the
+# headline treatment (see plan A1/B1): assigned at permit, before any
+# completion-speed selection operates. `completed` (occupancy by
+# occupancy_cutoff) is used only via one-sided-noncompliance SCALING in
+# @sec-results, never read directly as a coefficient.
+treated_sites <- sites |>
+  filter(year == 2024, !is.na(account_number)) |>
+  mutate(
+    site_id = row_number(),
+    completed = !is.na(occupancy_granted_date) & occupancy_granted_date <= occupancy_cutoff
+  )
+
+n_permit_issued <- nrow(treated_sites)
+n_completed <- sum(treated_sites$completed)
+pi_hat <- n_completed / n_permit_issued
+```
+
+Chunk note: `r n_permit_issued` sites in `permit_issued` (2024 RS mature ZBR-eligible new-builds with a resolved account); `r n_completed` (`r scales::percent(pi_hat, accuracy=1)`) are `completed` by the Sept 30 2025 cutoff. Compare the raw permit count above (461, pre-consolidation) -- consolidation and the account-match requirement bring it down to this. **Do not hardcode this number in prose; it changes if upstream data refreshes.**
+
+### Property group: can the influence even fire?
+
+```{r}
+#| label: tbl-property-group
+#| tbl-cap: "Share of 2024 ZBR sites whose unit count crosses the City's own 4-unit Minor-influence threshold"
+# Chunk note: the ORIGINAL open item ("check mill_class_1") was
+# mis-specified -- mill_class_1 is the MGA assessment CLASS, and a rowhome
+# is residential class regardless of unit count. The relevant
+# classification is the City's PROPERTY GROUP concept (Residential
+# Improved vs Multi-Residential), which for this influence's purposes
+# reduces to: does the site's own unit count, or its combined count with
+# any contiguous multi-residential property, reach 4? This table is a
+# headline number for the post: it tells the reader what share of the
+# treatment group even has a channel through which the coded influence
+# could apply.
+treated_sites |>
+  mutate(
+    unit_band = case_when(
+      units_added < 4 ~ "Under 4 (influence cannot fire)",
+      units_added <= 30 ~ "4-30 (Minor)",
+      units_added <= 75 ~ "31-75 (Moderate)",
+      TRUE ~ "76+ (Major)"
+    )
+  ) |>
+  count(category, unit_band) |>
+  pivot_wider(names_from = unit_band, values_from = n, values_fill = 0L) |>
+  gt::gt() |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+## Who counts as a neighbour? {#sec-adjacency}
+
+### Voronoi adjacency
+
+```{=html}
+<!-- TODO: explain why Voronoi (no parcel polygons exist in Edmonton Open
+Data -- every parcel dataset is POINT geometry, verified), and that the
+City's own adjacency rule ("abuts, or directly across a road or lane") IS
+a shared-Voronoi-edge relation. -->
+```
+
+```{r}
+#| label: build-voronoi
+#| cache: false
+# Tessellate ALL 2024 assessment points, every class and zone, inside
+# mature neighbourhoods + a 500m buffer. Not just RS, not just
+# residential: a school or corner store must own a cell, or the adjacent
+# house's cell balloons across it and manufactures false adjacency.
+#
+# DATA QUALITY FINDING (verified while building this post): about a third
+# of ALL 2024 assessment rows share a coordinate with 20+ other rows --
+# concentrated almost entirely in OLIVER, DOWNTOWN, GARNEAU, STRATHCONA,
+# WESTMOUNT and similar apartment/condo-dense mature neighbourhoods (up to
+# 1,152 rows sharing one point). These are condo/apartment buildings where
+# every suite-level account shares the building's one geocoded point. This
+# does NOT affect the RS-zoned analysis frame itself (frame_2024: max 12
+# rows share a coordinate, 98.8% of coordinates unique) because those
+# buildings are zoned RA/DC1/etc, not RS -- but it DOES mean any single
+# input point to the tessellation can carry many accounts, so the
+# account-per-cell check below is scoped to RS-zoned cells, not the full
+# tessellation input.
+mature_boundary <- mature_neighbourhood |> st_transform(crs) |> st_union()
+buffer_500 <- st_buffer(mature_boundary, 500)
+
+pts_all_2024 <- assessment_2024 |>
+  filter(!is.na(latitude), !is.na(longitude)) |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
+  st_transform(crs)
+
+tess_points <- pts_all_2024 |> st_filter(buffer_500)
+
+xy <- st_coordinates(tess_points)
+tess_points$pt_key <- paste(round(xy[, 1], 2), round(xy[, 2], 2)) # 1cm grid
+
+pt_accounts <- tess_points |> st_drop_geometry() |> select(pt_key, account_number, zoning, mill_class_1)
+tess_unique <- tess_points |> distinct(pt_key, .keep_all = TRUE)
+
+env <- st_as_sfc(st_bbox(st_buffer(st_geometry(tess_unique), 1000)))
+cells_raw <- st_voronoi(st_union(st_geometry(tess_unique)), envelope = env) |>
+  st_collection_extract("POLYGON") |> st_sfc(crs = crs)
+
+# st_voronoi() returns cells in ARBITRARY order -- recover the mapping by
+# point-in-polygon.
+idx <- st_within(st_geometry(tess_unique), cells_raw)
+stopifnot(all(lengths(idx) == 1))
+
+cells <- st_sf(
+  pt_key = tess_unique$pt_key,
+  cell_id = seq_len(nrow(tess_unique)),
+  geometry = cells_raw[unlist(idx)]
+)
+# Clip explicitly to the buffered boundary; GEOS often ignores `envelope`.
+cells <- st_intersection(cells, buffer_500)
+# NOTE: an earlier version of this pipeline used a pairwise st_intersection
+# between neighbouring cells to measure shared-edge length, which hung
+# GEOS indefinitely on this Voronoi output (a render stalled 10+ minutes
+# with the R process essentially idle -- no CPU, no network, no swap).
+# st_make_valid() was added as a fix for that, but st_is_valid() itself
+# turned out to be the slow step on ~105k cells in this environment
+# (confirmed: build-voronoi alone ran 1+ minute with no completion,
+# versus ~20s without it). Since the adjacency definition below is now
+# distance-only (see voronoi-adjacency) and no longer calls
+# st_intersection on cell pairs at all, validity repair is unnecessary --
+# removed rather than paying its cost for no benefit.
+cells$cell_area <- as.numeric(st_area(cells))
+
+n_tess_pts <- nrow(tess_points)
+n_tess_unique <- nrow(tess_unique)
+```
+
+Chunk note: `r scales::comma(n_tess_pts)` points in the buffer collapse to `r scales::comma(n_tess_unique)` distinct coordinates (verified: 170,580 -\> 105,679, \~20s total). Every point maps to exactly one cell.
+
+```{r}
+#| label: voronoi-adjacency
+#| cache: false
+# Order-1 rule: shares a Voronoi edge (raw st_touches()) AND the two
+# points are within 100m. The 100m cap removes edges reaching across the
+# river valley or a school field. High-confidence order-1 additionally
+# requires the two anchor points to be within 20m -- the review's own
+# real-points benchmark found order-1 neighbours sit a MEDIAN 45m apart,
+# so 20m isolates the side-by-side "next door" cases specifically.
+#
+# EARLIER DESIGN (abandoned): a shared-edge-LENGTH filter (>3m / >10m via
+# st_intersection) to distinguish real neighbours from kitty-corner
+# slivers, matching the original plan. Dropped after repeated renders
+# hung for 10+ minutes with the R process nearly idle (no CPU growth, no
+# network, no swap) -- consistent with GEOS spinning indefinitely on a
+# specific polygon pair inside that pairwise st_intersection loop, a
+# known failure mode for Voronoi output that neither st_make_valid() nor
+# a setTimeLimit()-guarded tryCatch reliably prevented in this
+# environment. Distance-only adjacency avoids st_intersection entirely
+# and is directly supported by the same benchmark: the median-45m /
+# kitty-corner-slivers-touch-at-a-point reasoning that motivated the edge
+# filter in the first place is well approximated by a tight distance cut.
+touch <- st_touches(cells)
+
+# Anchor each site to its 2024 tessellation cell via its matched account:
+# account_number -> pt_key -> cell_id.
+acct_to_cell <- pt_accounts |>
+  distinct(account_number, pt_key) |>
+  inner_join(cells |> st_drop_geometry() |> select(pt_key, cell_id), by = "pt_key")
+site_cell <- acct_to_cell$cell_id[match(treated_sites$account_number, acct_to_cell$account_number)]
+
+# Contamination cohorts (later permits, prior multi-unit builds): anchored
+# directly via the permit's OWN geometry rather than the 3-tier account
+# matcher, since we only need an approximate cell location to keep
+# contaminated controls out of the reference group -- not an exact value
+# match. st_nearest_feature() against tess_unique is fast (<1s) and
+# accurate to a few metres.
+later_sites <- bp |>
+  filter(year %in% 2025:2026, zoning == "RS", work_type == "(01) Building - New",
+         neighbourhood_type == "Mature", units_added >= 2, !st_is_empty(geometry))
+prior_multi <- bp |>
+  filter(year %in% 2019:2023, work_type == "(01) Building - New", units_added >= 4,
+         neighbourhood_type == "Mature", !st_is_empty(geometry))
+
+later_cell <- st_nearest_feature(later_sites, tess_unique)
+prior_cell <- st_nearest_feature(prior_multi, tess_unique)
+contamination_cells <- unique(c(later_cell, prior_cell))
+
+seed_cells <- unique(na.omit(site_cell))
+ring1_cells <- unique(unlist(touch[seed_cells]))
+need_cells <- unique(c(seed_cells, ring1_cells))
+
+pairs <- tibble(i = rep(need_cells, lengths(touch[need_cells])), j = unlist(touch[need_cells])) |>
+  mutate(a = pmin(i, j), b = pmax(i, j)) |>
+  distinct(a, b) |>
+  mutate(dist_m = as.numeric(st_distance(st_geometry(tess_unique)[a], st_geometry(tess_unique)[b], by_element = TRUE)))
+
+adj1_pairs <- pairs |> filter(dist_m <= 100)
+
+adj_list <- bind_rows(
+  adj1_pairs |> select(from = a, to = b),
+  adj1_pairs |> select(from = b, to = a)
+)
+
+order1_cells <- adj_list |> filter(from %in% seed_cells) |> distinct(to) |> pull(to)
+order2_cells <- adj_list |> filter(from %in% order1_cells) |> distinct(to) |> pull(to) |> setdiff(c(order1_cells, seed_cells))
+
+# High-confidence headline exposure: order-1 (shares a Voronoi edge) AND
+# anchor points within 20m -- see the note above on why distance-only
+# (rather than edge-length) is used, and why 20m specifically (median
+# order-1 distance is 45m, so this isolates side-by-side neighbours).
+hc_pairs <- pairs |> filter(dist_m <= 20)
+hc_adj_list <- bind_rows(hc_pairs |> select(from = a, to = b), hc_pairs |> select(from = b, to = a))
+order1_hc_cells <- hc_adj_list |> filter(from %in% seed_cells) |> distinct(to) |> pull(to)
+
+# near_other_site: RAW touch-adjacency of any later (2025-26) or prior
+# (2019-23, 4+ units) new-build permit. Keeps these properties out of the
+# reference group without deleting them. A false positive here only costs
+# a control observation, not a treated one, so the cheaper/looser
+# adjacency test is an acceptable tradeoff.
+near_other_site_cells <- unique(c(contamination_cells, unlist(touch[contamination_cells])))
+```
+
+```{r}
+#| label: adjacency-confusion-stub
+#| eval: false
+# TODO (manual step, not run at render time): hand-validate ~100 random
+# order-1 pairs against aerial imagery. This writes a CSV for hand-coding
+# and reads it back if present. Code each pair as one of:
+#   "abut" / "across_street" / "across_lane" / "neither"
+# then compute the false-positive rate alpha0 = P(coded neighbour | not
+# really adjacent) and report the corrected estimate beta_hat / (1 -
+# alpha0 - alpha1) in the results section. Direction to state explicitly
+# in prose: misclassification here attenuates toward zero, which is the
+# reported (null) answer -- see plan B4.
+validation_sample_path <- here::here("adjacency_validation_sample.csv")
+if (!file.exists(validation_sample_path)) {
+  set.seed(20260830)
+  sample_pairs <- adj1_pairs |> slice_sample(n = min(100, nrow(adj1_pairs)))
+  # Attach lat/lon of both cell anchor points for easy map lookup.
+  pt_a <- st_coordinates(st_transform(st_geometry(tess_unique)[sample_pairs$a], 4326))
+  pt_b <- st_coordinates(st_transform(st_geometry(tess_unique)[sample_pairs$b], 4326))
+  sample_pairs |>
+    mutate(lat_a = pt_a[, 2], lon_a = pt_a[, 1], lat_b = pt_b[, 2], lon_b = pt_b[, 1], adjacency_type = NA_character_) |>
+    write_csv(validation_sample_path)
+}
+```
+
+```{r}
+#| label: fig-voronoi-example
+#| fig-cap: "A Voronoi cell reproduces the City's own 'abuts, or directly across a road or lane' adjacency test"
+#| eval: false
+# TODO: pick one illustrative treated site, plot its cell + order-1
+# neighbours over a basemap (layers_map_base()), colour by
+# high-confidence vs not. This is flagged as the most-shared image in the
+# post scaffold -- worth polishing by hand once a good example site is found.
+```
+
+Chunk note: order-1 (any confidence, dist\<=100m): `r length(order1_cells)` cells. High-confidence order-1 (dist\<=20m): `r length(order1_hc_cells)` cells. Order-2: `r length(order2_cells)` cells.
+
+### Distance rings
+
+```{r}
+#| label: rings
+#| cache: false
+# Rings from each property's nearest 2024 treated site. Kept alongside
+# Voronoi because the methodology counts across-a-lane neighbours with NO
+# distance limit (traffic <15,000) but caps across-open-space at 50m -- so
+# a pure 50m radius misses rear-lane neighbours the City itself counts.
+site_pts <- st_geometry(tess_unique)[na.omit(site_cell)]
+site_ids_ordered <- treated_sites$site_id[!is.na(site_cell)]
+
+nn <- st_nearest_feature(frame_sf, site_pts)
+d_site <- as.numeric(st_distance(frame_sf, site_pts[nn], by_element = TRUE))
+
+frame_sf <- frame_sf |>
+  mutate(
+    nearest_site_id = site_ids_ordered[nn],
+    dist_site_m = d_site,
+    ring = cut(d_site, c(-Inf, 20, 50, 100, 200, Inf),
+               labels = c("0-20m", "20-50m", "50-100m", "100-200m", "200m+"))
+  )
+```
+
+```{r}
+#| label: fig-ring-vs-voronoi
+#| fig-cap: "A 50m radius catches side neighbours but misses most of the block across the lane"
+#| eval: false
+# TODO: histogram or scatter of Voronoi order-1 neighbour distance vs.
+# ring band -- median order-1 distance should land around 45m (verified on
+# a 9-neighbourhood benchmark), illustrating the ring/Voronoi mismatch.
+```
+
+## What actually happened, before any model {#sec-descriptive}
+
+```{=html}
+<!-- TODO: state plainly this is UNCONTROLLED -- no FE, no adjustment for
+general appreciation -- with a forward reference to @sec-results for the
+adjusted estimate. Flag any sharp disagreement between this table and the
+FE-adjusted estimate as itself worth a sentence (plan §6). -->
+```
+
+```{r}
+#| label: tbl-descriptive-change
+#| tbl-cap: "Raw, uncontrolled median and mean change in assessed value, 2023 to 2026, by exposure band"
+# Chunk note: value_2023 -> value_2026 raw change, no FE, no adjustment for
+# neighbourhood trend. The "200m+" row is the de facto "typical unaffected
+# mature-neighbourhood property" baseline a reader will mentally subtract
+# from the near-site rows even before seeing the causal estimate below.
+descriptive_panel <- panel |>
+  filter(assessment_year %in% c(2023, 2026)) |>
+  select(account_number, assessment_year, assessed_value) |>
+  pivot_wider(names_from = assessment_year, values_from = assessed_value, names_prefix = "value_") |>
+  filter(!is.na(value_2023), !is.na(value_2026)) |>
+  left_join(frame_sf |> st_drop_geometry() |> select(account_number, ring, dist_site_m, nearest_site_id), by = "account_number") |>
+  left_join(
+    tibble(account_number = acct_to_cell$account_number, cell_id = acct_to_cell$cell_id) |>
+      mutate(hc_order1 = cell_id %in% order1_hc_cells),
+    by = "account_number"
+  ) |>
+  mutate(
+    dollar_change = value_2026 - value_2023,
+    pct_change = value_2026 / value_2023 - 1,
+    # BUG FOUND AND FIXED: isTRUE() is a scalar function (checks a single
+    # value, not element-wise) -- applied to the hc_order1 VECTOR inside
+    # case_when(), it silently evaluated to one FALSE recycled across every
+    # row, so the "High-confidence Voronoi order-1" label never appeared
+    # even though hc_order1 was correctly TRUE for 426 of 73,319 rows.
+    # hc_order1 is already a clean logical (cell_id %in% order1_hc_cells
+    # never produces NA) and case_when() treats NA conditions as no-match
+    # on its own, so the bare column is enough here -- no %in% TRUE needed.
+    exposure_group = case_when(
+      hc_order1 ~ "High-confidence Voronoi order-1",
+      TRUE ~ as.character(ring)
+    )
+  )
+
+descriptive_panel |>
+  filter(!is.na(exposure_group)) |>
+  group_by(exposure_group) |>
+  summarise(
+    n = n(),
+    median_dollar = median(dollar_change),
+    mean_dollar = mean(dollar_change),
+    median_pct = median(pct_change),
+    mean_pct = mean(pct_change),
+    .groups = "drop"
+  ) |>
+  mutate(exposure_group = factor(exposure_group, levels = c(
+    "High-confidence Voronoi order-1", "0-20m", "20-50m", "50-100m", "100-200m", "200m+"
+  ))) |>
+  arrange(exposure_group) |>
+  gt::gt() |>
+  gt::fmt_currency(columns = c(median_dollar, mean_dollar), decimals = 0) |>
+  gt::fmt_percent(columns = c(median_pct, mean_pct), decimals = 1) |>
+  gt::cols_label(
+    exposure_group = "Exposure group", n = "n",
+    median_dollar = "Median $ change", mean_dollar = "Mean $ change",
+    median_pct = "Median % change", mean_pct = "Mean % change"
+  ) |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+## Method: a single-cohort event study {#sec-method}
+
+```{=html}
+<!-- TODO: single 2024 cohort -> plain TWFE unbiased, no sunab() needed;
+the ITT-headline + Bloom-scaling rationale (plan B1); the three-FE
+rationale (plan A3) -- explicitly state "this design measures whether the
+house next door is assessed differently from other houses in the same
+neighbourhood; it cannot measure whether the neighbourhood as a whole
+moved." -->
+```
+
+```{r}
+#| label: model-prep
+# near_other_site is computed in voronoi-adjacency above (near_other_site_cells),
+# from later_sites (2025-26 permits) and prior_multi (2019-23, 4+ units) --
+# keeps contaminated properties out of the reference group without
+# deleting them.
+#
+# Market area: the methodology's 9-area partition is published only as
+# boundary MAPS (raster images in the PDF appendix), not as text or a GIS
+# layer -- confirmed by extracting the PDF's text layer (gs -sDEVICE=txtwrite)
+# and searching Edmonton Open Data's catalog for a market-area/submarket
+# layer (none exists). Full digitization is out of scope for this post.
+#
+# One piece of the partition IS given as text, though: the Time Adjustment
+# Factors section names the River Valley submarket's member neighbourhoods
+# explicitly (17 names, all verified present in our 2024 roll, 12,350
+# RS-zoned rows across them -- a real, sourced, if partial, grouping).
+# Using it beats the alternative of a placeholder that just duplicates
+# neighbourhood_name (which would make "market area" FE identical to
+# "neighbourhood" FE, contributing nothing to tbl-fe-spread's comparison).
+# This is a genuine two-level market-area proxy (River Valley vs.
+# everything else), not the real 9-area partition -- said plainly in
+# prose, not overstated as the full result.
+river_valley_neighbourhoods <- c(
+  "BELGRAVIA", "BEVERLY HEIGHTS", "BONNIE DOON", "BROOKSIDE", "CAPILANO", "CLOVERDALE",
+  "GARNEAU", "GOLD BAR", "GRANDVIEW HEIGHTS", "GROVENOR", "HIGHLANDS", "LAURIER HEIGHTS",
+  "PATRICIA HEIGHTS", "ROSSDALE", "RUNDLE HEIGHTS", "WESTRIDGE", "WINDSOR PARK"
+)
+
+model_panel <- panel |>
+  left_join(descriptive_panel |> select(account_number, hc_order1, ring, nearest_site_id), by = "account_number") |>
+  left_join(
+    tibble(account_number = acct_to_cell$account_number, cell_id = acct_to_cell$cell_id) |>
+      mutate(is_near_other = cell_id %in% near_other_site_cells) |>
+      select(account_number, is_near_other),
+    by = "account_number"
+  ) |>
+  # WGS84 lat/lon, needed only for vcov_conley() (it computes its own
+  # geodesic distance internally and expects decimal-degree coordinates,
+  # not the projected CRS used everywhere else in this pipeline).
+  left_join(frame_2024 |> distinct(account_number, latitude, longitude), by = "account_number") |>
+  mutate(
+    permit_issued = hc_order1 %in% TRUE,
+    near_other_site = is_near_other %in% TRUE & !permit_issued,
+    market_area = if_else(neighbourhood_name %in% river_valley_neighbourhoods, "River Valley submarket", "Other market area")
+  )
+
+n_near_other <- sum(model_panel$near_other_site & model_panel$assessment_year == 2023)
+```
+
+```{r}
+#| label: fig-es-itt
+#| fig-cap: "Event study: assessed value of high-confidence order-1 neighbours of a 2024 ZBR permit, relative to 2023"
+es_itt <- feols(
+  log_value ~ i(assessment_year, permit_issued, ref = 2023) +
+              i(assessment_year, near_other_site, ref = 2023)
+  | account_number + neighbourhood_name^assessment_year,
+  data = model_panel,
+  vcov = ~nearest_site_id # primary; see tbl-se-robustness below for Conley spatial HAC comparison
+)
+
+broom::tidy(es_itt, conf.int = TRUE) |>
+  filter(str_detect(term, "permit_issued")) |>
+  mutate(assessment_year = as.integer(str_extract(term, "\\d{4}"))) |>
+  ggplot(aes(x = assessment_year, y = estimate)) +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 0, linetype = "dotted") +
+  geom_vline(xintercept = 2023.5, linetype = "dashed", colour = "grey50") +
+  labs(
+    title = "Assessed value near 2024 ZBR permits, relative to 2023",
+    subtitle = "High-confidence Voronoi order-1 neighbours",
+    x = "Assessment year", y = "Log point difference vs. 2023",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+Chunk note: this is the headline ITT estimate. Bloom-scale to a completed-site ATT via `theta_2026 / pi_hat` where `pi_hat = r round(pi_hat, 2)` (completed / permit_issued share) -- do NOT read the completed-cohort coefficient directly (it's selected on completion speed; see plan B1).
+
+```{r}
+#| label: tbl-fe-spread
+#| tbl-cap: "The same specification under three fixed-effect structures -- the spread is the measurement of how much a diffuse neighbourhood effect would be differenced away"
+# Chunk note: "River Valley submarket x year" is a REAL but PARTIAL
+# market-area grouping (River Valley submarket vs. everything else --
+# see model-prep for sourcing), coarser than neighbourhood but not the
+# full 9-area partition, which exists only as map images in the
+# methodology PDF (confirmed unextractable, and absent from Edmonton
+# Open Data's catalog). State this honestly rather than presenting it as
+# the real 9-area result.
+es_nbhd <- es_itt
+es_market <- feols(
+  log_value ~ i(assessment_year, permit_issued, ref = 2023) + i(assessment_year, near_other_site, ref = 2023)
+  | account_number + market_area^assessment_year,
+  data = model_panel, vcov = ~nearest_site_id
+)
+es_citywide <- feols(
+  log_value ~ i(assessment_year, permit_issued, ref = 2023) + i(assessment_year, near_other_site, ref = 2023)
+  | account_number + assessment_year,
+  data = model_panel, vcov = ~nearest_site_id
+)
+
+modelsummary(
+  list("Neighbourhood x year" = es_nbhd, "River Valley submarket x year" = es_market, "Citywide year" = es_citywide),
+  coef_map = c("assessment_year::2026:permit_issued" = "2026 (finished-building year)"),
+  statistic = "conf.int", gof_omit = ".*"
+) |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+```{r}
+#| label: tbl-se-robustness
+#| tbl-cap: "The 2026 coefficient's standard error under five clustering/inference choices"
+# Chunk note: resolves the vcov_conley() TODO. Verified vcov_conley() runs
+# correctly (fast: <1s at this scale) once its cutoff is understood as
+# KILOMETRES computed from geodesic lat/lon distance -- NOT the projected
+# CRS (metres) used everywhere else in this pipeline. An earlier attempt
+# with cutoff=500 (intending 500m) was silently interpreted as 500km,
+# which is larger than the whole study area and produced a near-singular,
+# meaningless SE (~1e-8) -- caught by testing on a synthetic panel at
+# realistic scale before trusting it on the real data. model_panel now
+# carries WGS84 lat/lon (attached in model-prep) specifically for this.
+#
+# Kept ~nearest_site_id as the PRIMARY vcov in es_itt/tbl-fe-spread above
+# (the shock is at the site, and every property -- treated and control --
+# is labelled by its nearest completed 2024 site) rather than replacing
+# it with Conley: the plan's own reasoning for site-clustering still
+# applies, and Conley's kernel-based alternative is reported here as a
+# comparison rather than substituted in blind, since this is the first
+# time it has been validated end-to-end on the actual panel rather than
+# a synthetic one.
+itt_coef_term <- "assessment_year::2026:permit_issued"
+
+se_row <- function(vcov_spec, label) {
+  m <- feols(
+    log_value ~ i(assessment_year, permit_issued, ref = 2023) +
+                i(assessment_year, near_other_site, ref = 2023)
+    | account_number + neighbourhood_name^assessment_year,
+    data = model_panel, vcov = vcov_spec
+  )
+  tt <- broom::tidy(m) |> filter(term == itt_coef_term)
+  tibble(vcov = label, estimate = tt$estimate, se = tt$std.error)
+}
+
+conley_vcov <- function(cutoff_km) {
+  function(x) vcov_conley(x, lat = "latitude", lon = "longitude", cutoff = cutoff_km)
+}
+
+bind_rows(
+  se_row(~account_number, "Clustered: account_number"),
+  se_row(~nearest_site_id, "Clustered: nearest_site_id (primary, used above)"),
+  se_row(~neighbourhood_name, "Clustered: neighbourhood_name"),
+  se_row(conley_vcov(0.25), "Conley spatial HAC, 0.25km cutoff"),
+  se_row(conley_vcov(0.5), "Conley spatial HAC, 0.5km cutoff"),
+  se_row(conley_vcov(1.0), "Conley spatial HAC, 1.0km cutoff")
+) |>
+  gt::gt() |>
+  gt::fmt_percent(columns = c(estimate, se), decimals = 3) |>
+  gt::cols_label(vcov = "Inference method", estimate = "2026 estimate", se = "SE") |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+## Results {#sec-results}
+
+```{r}
+#| label: fig-unit-threshold
+#| fig-cap: "Effect by adjacent contiguous unit count, binned around the City's own 4-unit Minor threshold"
+# Chunk note: THE key identification device (plan sec 7). A jump at 4 plus
+# flatness across 4-30 is the signature of the coded influence channel; a
+# smooth gradient in units is the signature of a market channel.
+#
+# Simplified to a first-difference (2023->2026) cross-section rather than
+# a full 8-year event study per bin: with only 372 treated sites split
+# across 9 unit-count bins, a per-bin event study would have too few
+# observations per cell to be informative. The FD regression needs only
+# one coefficient per bin.
+fd_panel <- model_panel |>
+  filter(assessment_year %in% c(2023, 2026)) |>
+  select(account_number, neighbourhood_name, assessment_year, log_value, permit_issued, near_other_site, nearest_site_id) |>
+  pivot_wider(names_from = assessment_year, values_from = log_value, names_prefix = "log_value_") |>
+  filter(!is.na(log_value_2023), !is.na(log_value_2026)) |>
+  mutate(d_log_value = log_value_2026 - log_value_2023) |>
+  left_join(treated_sites |> st_drop_geometry() |> select(site_id, site_units = units_added), by = c("nearest_site_id" = "site_id")) |>
+  mutate(
+    unit_bin = case_when(
+      !permit_issued ~ "Control",
+      site_units <= 3 ~ "2-3 (below Minor threshold)",
+      site_units <= 8 ~ "4-8 (Minor)",
+      TRUE ~ "9+ (Minor/Moderate)"
+    ),
+    unit_bin = fct_relevel(unit_bin, "Control")
+  )
+
+m_unit_threshold <- feols(d_log_value ~ unit_bin | neighbourhood_name, data = fd_panel, vcov = ~nearest_site_id)
+
+broom::tidy(m_unit_threshold, conf.int = TRUE) |>
+  mutate(term = str_remove(term, "unit_bin")) |>
+  ggplot(aes(x = term, y = estimate)) +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 0, linetype = "dotted") +
+  labs(
+    title = "2023-2026 assessed value change by adjacent unit count",
+    subtitle = "Relative to properties not adjacent to any 2024 ZBR site",
+    x = "Adjacent site's total units", y = "Log point difference vs. control",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+```{r}
+#| label: fig-residual-bimodality
+#| fig-cap: "Distribution of residualised change in assessed value, treated vs. control -- a mass point signals the coded channel, a smooth shift signals a market channel"
+# Chunk note: residualise d_log_value on neighbourhood FE (via fixest's
+# demeaning), then compare treated vs. control densities. A multiplicative
+# coded influence factor produces a mass point at -log(1+delta); a market
+# effect produces a smooth location shift.
+fd_panel <- fd_panel |>
+  mutate(resid_d_log_value = residuals(feols(d_log_value ~ 1 | neighbourhood_name, data = fd_panel)))
+
+fd_panel |>
+  mutate(group = if_else(permit_issued, "Adjacent to 2024 ZBR site", "Control")) |>
+  ggplot(aes(x = resid_d_log_value, fill = group, colour = group)) +
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "Residualised 2023-2026 assessed value change",
+    subtitle = "Neighbourhood fixed effects removed",
+    x = "Residual log point change", y = "Density", fill = NULL, colour = NULL,
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+```{r}
+#| label: fig-es-rings
+#| fig-cap: "Effect by distance ring -- no ring, including the 50m one critics cite, separates from zero"
+es_rings <- feols(
+  log_value ~ i(assessment_year, ring, ref = 2023, ref2 = "200m+") + i(assessment_year, near_other_site, ref = 2023)
+  | account_number + neighbourhood_name^assessment_year,
+  data = model_panel,
+  vcov = ~nearest_site_id
+)
+
+broom::tidy(es_rings, conf.int = TRUE) |>
+  filter(str_detect(term, "^assessment_year::2026:ring::")) |>
+  mutate(ring_band = str_remove(term, "assessment_year::2026:ring::")) |>
+  ggplot(aes(x = ring_band, y = estimate)) +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 0, linetype = "dotted") +
+  labs(
+    title = "2026 assessed value by distance ring from nearest 2024 ZBR site",
+    subtitle = "Relative to properties 200m+ away, relative to 2023",
+    x = "Distance ring", y = "Log point difference vs. 200m+ reference, 2026 vs 2023",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+```{r}
+#| label: tbl-equivalence
+#| tbl-cap: "Equivalence test against the ENU claim (-7.4%) and a stricter +/-2% margin"
+# TOST: two one-sided tests of H0: beta <= -delta or beta >= delta.
+# Rejecting both licenses "the claim is rejected at the 5% level."
+tost <- function(model, term, delta, alpha = 0.05) {
+  tt <- broom::tidy(model) |> filter(term == !!term)
+  est <- tt$estimate
+  se <- tt$std.error
+  t_lower <- (est - (-delta)) / se # test H0: beta <= -delta
+  t_upper <- (est - delta) / se # test H0: beta >= delta
+  p_lower <- pt(t_lower, df = Inf, lower.tail = FALSE)
+  p_upper <- pt(t_upper, df = Inf, lower.tail = TRUE)
+  p_tost <- max(p_lower, p_upper)
+  tibble(estimate = est, se = se, delta = delta, p_tost = p_tost, reject_effect_ge_delta = p_tost < alpha)
+}
+
+itt_term <- "assessment_year::2026:permit_issued"
+bind_rows(
+  tost(es_itt, itt_term, delta = 0.074) |> mutate(margin = "ENU claim (7.4%)"),
+  tost(es_itt, itt_term, delta = 0.02) |> mutate(margin = "Stricter margin (2%)")
+) |>
+  select(margin, estimate, se, delta, p_tost, reject_effect_ge_delta) |>
+  gt::gt() |>
+  gt::fmt_percent(columns = c(estimate, se, delta), decimals = 2) |>
+  gt::fmt_number(columns = p_tost, decimals = 4) |>
+  gt::cols_label(
+    margin = "Equivalence margin", estimate = "2026 estimate", se = "SE",
+    delta = "Margin (delta)", p_tost = "TOST p-value", reject_effect_ge_delta = "Effect this large rejected?"
+  ) |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+## Is the assessment even looking? {#sec-can-the-model-see-it}
+
+```{=html}
+<!-- TODO: two positive controls here, each testing a different mechanism.
+West Line (primary): construction-disruption effect, clean pre-period.
+SE Line (exploratory, caveated): coded-influence effect, but no clean
+pre-period exists in our data -- construction began 2016, panel starts
+2019. See the chunk notes for the full reasoning. See plan sec 9. -->
+```
+
+```{r}
+#| label: fig-lrt-west-positive-control
+#| fig-cap: "Positive control: did assessments move when properties newly qualified for construction-adjacent status on Valley Line West?"
+# Chunk note: PRIMARY positive control (added after the SE Line check
+# below turned out to have no usable pre-period -- see its note for why).
+# Valley Line West construction started in 2021 (financial close with the
+# builder was Dec 23 2020; a "one year of construction" groundbreaking
+# marker was held at Lewis Farms in May 2022, implying work began around
+# spring 2021) -- squarely inside our 2019-2026 panel, so 2019-2020 is a
+# genuinely clean pre-construction period. The line has NOT opened
+# (expected complete 2028), so this tests a DIFFERENT mechanism than the
+# SE Line check below: whether CONSTRUCTION DISRUPTION alone moves
+# assessed value, not whether the City's coded LRT influence fires (that
+# influence most plausibly attaches to operating infrastructure, which
+# West Line doesn't have yet). Arguably a closer analog to "an 8-plex
+# under construction next door" than the SE Line's "operating station"
+# comparison, though.
+#
+# 14 West Line stations, verified against the West Line's published
+# station list (Lewis Farms, Aldergrove/Belmead, West Edmonton Mall,
+# Misericordia, Meadowlark, Glenwood/Sherwood, Jasper Place, Stony Plain
+# Road/149 St, Grovenor/142 St, Glenora, 124 Street, Brewery/120 St, The
+# Yards/116 St, MacEwan Arts/112 St) -- all 14 matched exactly against
+# transit_stops with zero discrepancies; the remaining "future" stops in
+# that object (Alex Decoteau, Blatchford Gate, Heritage Valley North,
+# NAIT/Blatchford Market, NorQuest, Twin Brooks) belong to the separate
+# Capital Line North/South extensions and are excluded.
+vlw_names <- c("Lewis Farms Stop", "Aldergrove/Belmead Stop", "West Edmonton Mall Stop",
+               "Misericordia Stop", "Meadowlark Stop", "Glenwood/Sherwood Stop",
+               "Jasper Place Stop", "Stony Plain Road/149 St Stop", "Grovenor/142 Street Stop",
+               "Glenora Stop", "124 Street Stop", "Brewery/120 Street Stop",
+               "The Yards/116 Street Stop", "MacEwan Arts/112 Street Stop")
+vlw_stops <- transit_stops |> filter(stop_name %in% vlw_names)
+stopifnot(nrow(vlw_stops) == length(vlw_names)) # catch a silent name mismatch
+
+nn_vlw <- st_nearest_feature(frame_sf, vlw_stops)
+d_vlw <- as.numeric(st_distance(frame_sf, vlw_stops[nn_vlw, ], by_element = TRUE))
+vlw_treated_accounts <- frame_sf$account_number[d_vlw <= 100]
+
+lrt_west_panel <- panel |>
+  mutate(construction_treated = account_number %in% vlw_treated_accounts)
+
+n_lrt_west_treated <- n_distinct(panel$account_number[panel$account_number %in% vlw_treated_accounts])
+
+# ref = 2020: the last roll (valuation date July 1 2020) clearly predating
+# construction start (~spring 2021) -- not 2023, which was the SE Line's
+# reference year based on ITS OWN (much later) treatment date.
+es_lrt_west <- feols(
+  log_value ~ i(assessment_year, construction_treated, ref = 2020)
+  | account_number + neighbourhood_name^assessment_year,
+  data = lrt_west_panel, vcov = ~neighbourhood_name
+)
+
+broom::tidy(es_lrt_west, conf.int = TRUE) |>
+  filter(str_detect(term, "construction_treated")) |>
+  mutate(assessment_year = as.integer(str_extract(term, "\\d{4}"))) |>
+  ggplot(aes(x = assessment_year, y = estimate)) +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 0, linetype = "dotted") +
+  geom_vline(xintercept = 2021, linetype = "dashed", colour = "grey50") +
+  annotate("text", x = 2021, y = Inf, label = "Valley Line West construction began ~2021", vjust = 1.5, hjust = -0.05, size = 3) +
+  labs(
+    title = "Positive control: RS properties within 100m of a Valley Line West stop",
+    subtitle = "Construction-disruption mechanism, clean pre-construction period (2019-2020)",
+    x = "Assessment year", y = "Log point difference vs. 2020",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+Chunk note: `r n_lrt_west_treated` RS-zoned properties within 100m of a Valley Line West stop. Unlike the SE Line check below, this one has an interpretable pre-period: 2019 and 2020 are genuinely pre-construction, so flat coefficients there plus a post-2021 movement (either direction) would show the design can detect a real, dated disruption. A flat line all the way through would be the more surprising result and worth a sentence of its own -- it would suggest either that construction disruption isn't capitalized into assessed value at all, or that this design still can't detect it even with clean timing.
+
+```{r}
+#| label: fig-lrt-se-exploratory
+#| fig-cap: "Exploratory, not a validated positive control: Valley Line Southeast, where construction predates this panel"
+# Chunk note: DEMOTED from "positive control" to exploratory. Valley Line
+# Southeast construction began March/April 2016 (groundbreaking ceremony
+# held AT Muttart Stop specifically, one of the 10 stations below) --
+# seven years before this panel's first year (2019) and years before its
+# November 4 2023 opening. That means EVERY year in this panel is already
+# "post construction-start" for these properties: there is no clean
+# pre-period against which to read 2019-2022 as a genuine pre-trend. The
+# original framing (ref = 2023, treating the Nov 2023 opening as the
+# treatment date) implicitly assumed 2019-2022 were untreated -- they may
+# not be, if disruption or anticipatory capitalization began years
+# earlier. This figure is kept because the SE Line is the closest analog
+# to "an OPERATING multi-unit structure next door" (unlike West Line,
+# which hasn't opened) -- but it cannot be read as validating or
+# invalidating detection power the way fig-lrt-west-positive-control can.
+vlse_names <- c("Quarters Stop", "Muttart Stop", "Strathearn Stop", "Holyrood Stop",
+                "Bonnie Doon Stop", "Avonmore Stop", "Millbourne/Woodvale Stop",
+                "Mill Woods Stop", "Grey Nuns Stop", "Davies Station")
+vlse_stops <- transit_stops |> filter(stop_name %in% vlse_names)
+
+nn_vlse <- st_nearest_feature(frame_sf, vlse_stops)
+d_vlse <- as.numeric(st_distance(frame_sf, vlse_stops[nn_vlse, ], by_element = TRUE))
+vlse_treated_accounts <- frame_sf$account_number[d_vlse <= 100]
+
+lrt_panel <- panel |>
+  mutate(lrt_treated = account_number %in% vlse_treated_accounts)
+
+n_lrt_treated <- n_distinct(panel$account_number[panel$account_number %in% vlse_treated_accounts])
+
+es_lrt <- feols(
+  log_value ~ i(assessment_year, lrt_treated, ref = 2023)
+  | account_number + neighbourhood_name^assessment_year,
+  data = lrt_panel, vcov = ~neighbourhood_name
+)
+
+broom::tidy(es_lrt, conf.int = TRUE) |>
+  filter(str_detect(term, "lrt_treated")) |>
+  mutate(assessment_year = as.integer(str_extract(term, "\\d{4}"))) |>
+  ggplot(aes(x = assessment_year, y = estimate)) +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 0, linetype = "dotted") +
+  geom_vline(xintercept = 2023.5, linetype = "dashed", colour = "grey50") +
+  annotate("text", x = 2016, y = -Inf, label = "Construction began 2016 (7 yrs before this panel starts)", vjust = -0.8, hjust = 0, size = 3) +
+  labs(
+    title = "Exploratory: RS properties within 100m of a Valley Line SE stop",
+    subtitle = "Construction began 2016 -- no year in this panel is a clean pre-period; do not read this as pre/post",
+    x = "Assessment year", y = "Log point difference vs. 2023 (reference year, NOT a true pre-period)",
+    caption = CAPTION_COE
+  ) +
+  theme_jd(mode = "light")
+```
+
+Chunk note: `r n_lrt_treated` RS-zoned properties within 100m of a Valley Line SE stop. **Do not interpret this the way the plan originally intended** (flat pre-trend then a jump at 2023 validating detection power) -- there is no genuine pre-period in this data to be flat or not. Whatever pattern appears here is consistent with construction/anticipation effects having already been priced in well before 2019, with the coded LRT influence effect (if any) layered on top somewhere in a window we can't isolate. Kept as a data point, not a claim.
+
+```{r}
+#| label: tbl-lrt-radius-power
+#| tbl-cap: "Does a wider radius give the LRT positive controls more power? n and precision at 100m, 200m, 400m"
+# Chunk note: both LRT checks above ran on only 45-58 properties within
+# 100m -- likely underpowered rather than a genuine null, since LRT
+# stations are typically ringed by apartment/commercial zoning rather
+# than RS, pushing most RS-zoned properties further out. This table
+# tests whether widening the radius (more properties, but also more
+# attenuation from including properties less plausibly affected) changes
+# anything. Collapsed to a single post-period average effect per radius
+# (not the full year-by-year event study) since the point here is
+# precision at a glance across radii, not the year-by-year shape --
+# same collapsing approach already used for the property-specific-trends
+# robustness row.
+lrt_radius_check <- function(stops, ref_treat_year, panel_data, label) {
+  radii <- c(100, 200, 400)
+  map_dfr(radii, function(r) {
+    nn <- st_nearest_feature(frame_sf, stops)
+    d <- as.numeric(st_distance(frame_sf, stops[nn, ], by_element = TRUE))
+    treated_accounts <- frame_sf$account_number[d <= r]
+
+    d_panel <- panel_data |>
+      mutate(
+        lrt_treated = account_number %in% treated_accounts,
+        post = assessment_year > ref_treat_year,
+        treated_post = lrt_treated & post
+      )
+
+    m <- feols(
+      log_value ~ treated_post | account_number + neighbourhood_name^assessment_year,
+      data = d_panel, vcov = ~neighbourhood_name
+    )
+    tt <- broom::tidy(m) |> filter(term == "treated_postTRUE")
+
+    tibble(
+      line = label, radius_m = r,
+      n_treated = n_distinct(panel_data$account_number[panel_data$account_number %in% treated_accounts]),
+      estimate = tt$estimate, se = tt$std.error
+    )
+  })
+}
+
+bind_rows(
+  lrt_radius_check(vlw_stops, 2020, panel, "West Line (ref 2020)"),
+  lrt_radius_check(vlse_stops, 2023, panel, "SE Line (ref 2023, no clean pre-period)")
+) |>
+  gt::gt(groupname_col = "line") |>
+  gt::fmt_percent(columns = c(estimate, se), decimals = 2) |>
+  gt::cols_label(radius_m = "Radius (m)", n_treated = "n treated", estimate = "Post-period estimate", se = "SE") |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+Chunk note: if SE drops sharply from 100m to 400m while the point estimate stays roughly put, that's the signature of a real power problem -- the 100m checks above were simply too small a sample to say anything, and the wider radius is the more trustworthy read. If the estimate itself drifts substantially (not just its precision), that's a sign the wider radius is picking up something systematically different -- properties too far out to plausibly be affected by either line -- and the 100m estimate, imprecise as it is, was the more meaningful one.
+
+```{r}
+#| label: redeveloped-lot-integrity-check
+#| include: false
+# Demoted per plan B6: this validates data plumbing (account numbers
+# persist through redevelopment, feols runs), NOT neighbour-effect
+# detection -- it tests an effect ~100x the size, through the subject
+# property's OWN structural variables. One assertion, not a headline figure.
+redeveloped_matched <- sites |>
+  filter(year == 2024, !is.na(account_number), account_number %in% panel$account_number) |>
+  select(account_number) |>
+  distinct()
+
+redev_panel <- panel |> mutate(redeveloped = account_number %in% redeveloped_matched$account_number)
+n_redev_in_panel <- sum(redev_panel$redeveloped & redev_panel$assessment_year == 2023)
+
+if (n_redev_in_panel >= 10) {
+  es_redev_check <- feols(
+    log_value ~ i(assessment_year, redeveloped, ref = 2023) | account_number + neighbourhood_name^assessment_year,
+    data = redev_panel, vcov = ~neighbourhood_name
+  )
+  redev_2026_coef <- broom::tidy(es_redev_check) |>
+    filter(str_detect(term, "2026:redeveloped")) |>
+    pull(estimate)
+  # Plumbing check only: expect a LARGE positive coefficient (order +1 log
+  # point, matching property-tax-uplift's ~$1.5M/~$400k gross uplift),
+  # confirming account numbers persist through redevelopment in this
+  # panel and the regression pipeline runs correctly on a structural
+  # change. NOT a validation of neighbour-effect detection power.
+  stopifnot(length(redev_2026_coef) == 1, redev_2026_coef > 0.3)
+}
+```
+
+## Where does -7.4% come from? {#sec-enu}
+
+<!-- TODO: the three-part honest framing (plan sec 10). -->
+
+```{r}
+#| label: fig-hedonic-decomposition
+#| fig-cap: "A cross-sectional hedonic on 2026 values, restricted to 6+ unit sites, vs. the panel-FE result on the same properties"
+# Chunk note: demonstrates rather than asserts claim (3) in sec-enu -- that
+# ENU's between-property comparison cannot separate a within-neighbourhood
+# siting-selection effect from a true infill effect, while the panel FE
+# design can. Treatment here mirrors ENU's own stated design as closely as
+# this data allows: within 50m of a site with >=6 units (ENU's
+# developments ranged sixplex to 16-unit), cross-sectional on the 2026
+# roll, hedonic controls for year_built and lot_size (floor area /
+# bedroom count are NOT in Edmonton's public assessment data -- a real
+# limitation of this replication, noted here rather than glossed over),
+# with neighbourhood fixed effects (their stated "neighbourhood" control).
+sites_6plus <- treated_sites |> filter(units_added >= 6)
+sites_6plus_cell <- acct_to_cell$cell_id[match(sites_6plus$account_number, acct_to_cell$account_number)]
+sites_6plus_pts <- st_geometry(tess_unique)[na.omit(sites_6plus_cell)]
+
+hedonic_frame_sf <- analysis_frame |>
+  filter(!is.na(year_built), !is.na(lot_size), lot_size > 0) |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
+  st_transform(crs)
+
+nn_6plus <- st_nearest_feature(hedonic_frame_sf, sites_6plus_pts)
+d_6plus <- as.numeric(st_distance(hedonic_frame_sf, sites_6plus_pts[nn_6plus, ], by_element = TRUE))
+dist_lookup <- tibble(account_number = hedonic_frame_sf$account_number, d_6plus = d_6plus)
+
+hedonic_frame <- analysis_frame |>
+  filter(!is.na(year_built), !is.na(lot_size), lot_size > 0) |>
+  as_tibble() |>
+  select(account_number, neighbourhood_name, year_built, lot_size) |>
+  inner_join(assessment_2026 |> select(account_number, value_2026 = assessed_value), by = "account_number") |>
+  inner_join(dist_lookup, by = "account_number") |>
+  filter(!is.na(value_2026), value_2026 > 0) |>
+  mutate(
+    within_50m_6plus = d_6plus <= 50,
+    log_value_2026 = log(value_2026)
+  )
+
+m_cross_sectional <- feols(
+  log_value_2026 ~ within_50m_6plus + year_built + log(lot_size) | neighbourhood_name,
+  data = hedonic_frame
+)
+
+m_panel_fe <- feols(
+  log_value ~ i(assessment_year, permit_issued, ref = 2023)
+  | account_number + neighbourhood_name^assessment_year,
+  data = model_panel |> filter(!near_other_site | permit_issued),
+  vcov = ~nearest_site_id
+)
+
+modelsummary(
+  list(
+    "Cross-sectional (ENU-style)\n2026 only" = m_cross_sectional,
+    "Panel FE\n2026 vs 2023" = es_itt
+  ),
+  coef_map = c(
+    "within_50m_6plusTRUE" = "Within 50m of 6+ unit site",
+    "assessment_year::2026:permit_issued" = "Adjacent to 2024 ZBR site (2026 vs 2023)"
+  ),
+  statistic = "conf.int", gof_omit = ".*"
+) |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+Chunk note: if the cross-sectional column shows a negative, significant coefficient while the panel-FE column does not, that demonstrates the likely mechanism behind ENU's -7.4% using only public data -- within-neighbourhood siting selection (infill built on cheaper lots, older housing stock, back lanes) that a single neighbourhood fixed effect cannot absorb, but that a property fixed effect does by construction. This is a decomposition, not a claim that ENU's actual number is reproduced exactly -- their treatment is sale price on a self-selected sold sample; this is assessed value on the full population.
+
+## Robustness {#sec-robustness}
+
+```{r}
+#| label: tbl-robustness
+#| tbl-cap: "The 2026 coefficient under six robustness checks"
+# Chunk note: each row re-fits the headline spec (property + neighbourhood
+# x year FE, cluster ~nearest_site_id) on a modified sample or model,
+# holding everything else fixed. A coefficient that moves sharply on any
+# row is worth a sentence explaining why; stability across all six is the
+# stronger form of evidence a single headline number can't provide alone.
+fit_headline <- function(data) {
+  m <- feols(
+    log_value ~ i(assessment_year, permit_issued, ref = 2023) +
+                i(assessment_year, near_other_site, ref = 2023)
+    | account_number + neighbourhood_name^assessment_year,
+    data = data, vcov = ~nearest_site_id
+  )
+  broom::tidy(m) |> filter(term == "assessment_year::2026:permit_issued")
+}
+
+# (1) Donut: drop the 20-200m band entirely, comparing high-confidence
+# order-1 neighbours only against the 200m+ reference -- tests whether
+# the "control" group is itself mildly exposed.
+donut_panel <- model_panel |> filter(permit_issued | ring == "200m+")
+
+# (2) Strict never-treated: control further restricted to properties that
+# are ALSO not touch-adjacent to any later (2025-26) or prior (2019-23,
+# 4+ unit) new-build permit. Compute the count; if it falls under ~10,000
+# the near_other_site indicator alone (already used in the headline
+# model) is the fallback, which is what this row effectively re-tests.
+strict_control_panel <- model_panel |> filter(permit_issued | (ring == "200m+" & !near_other_site))
+n_strict_never_treated <- n_distinct(strict_control_panel$account_number[!strict_control_panel$permit_issued])
+
+# (3) Unbalanced panel: refit on panel_raw (before the balanced-8-years
+# restriction), rejoining the same treatment/contamination/market-area
+# columns used for model_panel.
+unbalanced_panel <- panel_raw |>
+  mutate(log_value = log(assessed_value)) |>
+  left_join(descriptive_panel |> select(account_number, hc_order1, ring, nearest_site_id), by = "account_number") |>
+  left_join(
+    tibble(account_number = acct_to_cell$account_number, cell_id = acct_to_cell$cell_id) |>
+      mutate(is_near_other = cell_id %in% near_other_site_cells) |>
+      select(account_number, is_near_other),
+    by = "account_number"
+  ) |>
+  filter(assessment_year %in% 2019:2026) |>
+  mutate(
+    permit_issued = hc_order1 %in% TRUE,
+    near_other_site = is_near_other %in% TRUE & !permit_issued
+  )
+
+# (4) Property-specific linear trends: partially absorbs a level shift,
+# so treated as a robustness row, not primary. fixest's fe_var[cont_var]
+# syntax adds one linear slope per account_number (verified fast: <1s at
+# this scale). VERIFIED PROBLEM: combined with fit_headline()'s fully
+# flexible year-by-year i(assessment_year, permit_issued) event study,
+# fixest drops the 2026 term entirely for collinearity -- with only 8
+# periods per account and treatment fixed within account (permit_issued
+# never varies over time for a given account), an account-specific
+# straight line already absorbs nearly all of that account's variation,
+# leaving nothing for a further year-specific dummy to identify. This is
+# a known fragility of combining individual trends with a fully flexible
+# event-study spec in a short panel (not a bug -- the correct response is
+# a simpler treatment variable for this one row, standard practice for
+# this robustness check). Collapsed to a single POST-2023 binary
+# indicator instead of the year-by-year interaction, matching how this
+# check is normally done in the literature.
+fit_trend_check <- function(data) {
+  m <- feols(
+    log_value ~ treated_post + near_other_post |
+      account_number + neighbourhood_name^assessment_year + account_number[assessment_year],
+    data = data |> mutate(
+      post_2023 = assessment_year >= 2024,
+      treated_post = permit_issued & post_2023,
+      near_other_post = near_other_site & post_2023
+    ),
+    vcov = ~nearest_site_id
+  )
+  broom::tidy(m) |> filter(term == "treated_postTRUE")
+}
+
+# (5) Drop-any-permit: broader than the self-redeveloped exclusion above
+# (which only drops new-build/demolition permits) -- excludes any
+# property with ANY permit at all 2019-2026 (renovation, garage, deck,
+# suite conversion), on the logic that even a minor permit could reflect
+# something about the property/neighbourhood that confounds the design.
+any_permit_2019_2026 <- bp_raw |>
+  st_drop_geometry() |>
+  filter(year %in% 2019:2026)
+any_permit_keys <- any_permit_2019_2026 |>
+  bind_cols(parse_permit_legal(any_permit_2019_2026$legal_description)) |>
+  mutate(key = normalize_key(plan, block, lot)) |>
+  filter(!is.na(key)) |> distinct(key) |> pull(key)
+
+any_permit_accounts <- frame_keyed |>
+  as_tibble() |>
+  filter(own_key %in% any_permit_keys) |>
+  pull(account_number)
+
+drop_any_permit_panel <- model_panel |> filter(!account_number %in% any_permit_accounts | permit_issued)
+
+# (6) Drop-ever-derelict: excludes properties ever classified "MA
+# DERELICT RESIDENTIAL" in any year 2019-2026 -- an OUTCOME (derelict
+# properties are assessed at land value per the methodology), so this is
+# a robustness row deliberately, not the headline exclusion (see
+# exclude-self-redeveloped's note on why derelict status isn't excluded
+# up front).
+ever_derelict_accounts <- assessment_all |>
+  filter(mill_class_1 == "MA DERELICT RESIDENTIAL") |>
+  distinct(account_number) |> pull(account_number)
+drop_derelict_panel <- model_panel |> filter(!account_number %in% ever_derelict_accounts | permit_issued)
+
+robustness_rows <- bind_rows(
+  fit_headline(model_panel) |> mutate(check = "Headline (balanced panel, high-confidence order-1)"),
+  fit_headline(donut_panel) |> mutate(check = "Donut: drop 20-200m band"),
+  fit_headline(strict_control_panel) |> mutate(check = sprintf("Strict never-treated (n=%s)", scales::comma(n_strict_never_treated))),
+  fit_headline(unbalanced_panel) |> mutate(check = "Unbalanced panel"),
+  fit_trend_check(model_panel) |> mutate(check = "Property-specific linear trends (post-2023 avg. effect, not year-by-year)"),
+  fit_headline(drop_any_permit_panel) |> mutate(check = "Drop any 2019-2026 permit (not just new-build/demo)"),
+  fit_headline(drop_derelict_panel) |> mutate(check = "Drop ever-derelict properties")
+)
+
+robustness_rows |>
+  mutate(conf.low = estimate - 1.96 * std.error, conf.high = estimate + 1.96 * std.error) |>
+  select(check, estimate, conf.low, conf.high) |>
+  gt::gt() |>
+  gt::fmt_percent(columns = c(estimate, conf.low, conf.high), decimals = 2) |>
+  gt::cols_label(check = "Robustness check", estimate = "2026 estimate", conf.low = "95% CI low", conf.high = "95% CI high") |>
+  jdawangHelpers::finalize_gt() |>
+  jdawangHelpers::opt_stylize_jd()
+```
+
+## Caveats {#sec-caveats}
+
+```{=html}
+<!-- TODO bullets (plan sec 11, not finished prose):
+- Assessed value is not sale price (also belongs in para 2 of the intro)
+- Five-year sales window limits power against a market effect that
+  emerged only after the first ZBR buildings finished
+- The estimand is within-neighbourhood RELATIVE (market_area/citywide FE
+  spread in tbl-fe-spread is the honest measure of how much this matters)
+- Developer selection biases toward a positive effect (upper-bound framing)
+- Voronoi measurement error attenuates toward the reported null -- state
+  the direction explicitly, with the hand-validated confusion matrix
+- One cohort, two post-periods: long-run effects unmeasured
+- A positive finding would also have been reported
+-->
+```
+
+## What this means for Council {#sec-conclusion}
+
+```{=html}
+<!-- TODO: the Principe motion, what Administration will/won't be able to
+answer, the ask, Grow Together Edmonton CTA. -->
+```
+
+```{r}
+#| label: key-facts-validation
+#| include: false
+# TODO: once the Key numbers bullets above are written with hardcoded
+# figures, stopifnot() each rounded computed value against its hardcoded
+# twin here, mirroring property-tax-uplift's key-facts-validation chunk.
+```
+
+```{r}
+#| label: verification-checks
+#| include: false
+# Core integrity checks, run every render. Thresholds from the plan's
+# real-data benchmarks (verified while building this file).
+stopifnot(
+  # Voronoi integrity
+  all(lengths(idx) == 1),
+  nrow(cells) == nrow(tess_unique),
+
+  # Panel integrity
+  all(panel |> count(account_number) |> pull(n) == 8),
+  pct_balanced > 0.93,
+  all(is.finite(panel$log_value)),
+
+  # Sample floors
+  n_permit_issued >= 300,
+  n_distinct(treated_sites$neighbourhood) >= 40
+)
+
+# Account-per-cell check, scoped to RS-zoned cells specifically (see the
+# data-quality finding in build-voronoi above -- a blanket check across
+# ALL tessellation cells would fail hard on Downtown/Oliver apartment
+# buildings, which are not part of the RS-zoned analysis universe anyway).
+#
+# VERIFIED on the real data: within RS-zoned cells the distribution is
+# 85,540 cells with 1 account, 544 with 2, tapering off, with only 22
+# cells (of ~86,300) carrying more than 5 -- these are legitimate existing
+# condo-titled RS multi-unit buildings (rowhouses/multiplexes with
+# populated `suite` values sharing one geocoded point), not a data error.
+# Max observed: 58. The threshold below is a loose sanity floor, not a
+# tight bound -- its job is to catch a tessellation bug (e.g. a
+# mis-scoped filter accidentally pulling in Downtown apartment towers),
+# not to flag every legitimate multi-unit building.
+rs_accounts_per_cell <- pt_accounts |>
+  filter(zoning == "RS", is.na(mill_class_1) | mill_class_1 %in% c("RESIDENTIAL", "OTHER RESIDENTIAL")) |>
+  count(pt_key, name = "n_accounts")
+n_rs_cells_over_10 <- sum(rs_accounts_per_cell$n_accounts > 10)
+stopifnot(max(rs_accounts_per_cell$n_accounts, 0) <= 100, n_rs_cells_over_10 <= 30)
+```
