@@ -137,7 +137,7 @@ resources:
       <li>The LRT layer draws the line and stops, and can also show 400 m and 800 m distances from stops.</li>
       <li>Only fiveplexes to eightplexes show at first. Tick backyard houses and duplexes to fourplexes to add them. Every number on the page follows the filters. The shading is fixed. <em>Occupancy granted only</em> keeps just permits the City has recorded as completed.</li>
       <li>Hover a neighbourhood to preview its stats; click to pin them. Click a dot for the permit's address.</li>
-      <li>Purple neighbourhoods have fewer people than in 1971, gold ones have more, and white ones are about the same. Grey neighbourhoods have no 1971 count. Neighbourhoods that aren't drawn have no RS-zoned lots, which includes most newer suburbs, where low-density land is zoned RSF instead.</li>
+      <li>Gold neighbourhoods have fewer people than in 1971, purple ones have more, and white ones are about the same. Grey neighbourhoods have no 1971 count. Neighbourhoods that aren't drawn have no RS-zoned lots, which includes most newer suburbs, where low-density land is zoned RSF instead.</li>
     </ul>
     <details>
       <summary>Method and caveats</summary>

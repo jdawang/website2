@@ -10,9 +10,9 @@
     light: {
       types: ['#2a78d6', '#eb6834', '#1baf7a'],
       ring: '#ffffff',
-      // Diverging, purple (decline) to gold (growth) with a white midpoint. Not green, which
-      // would collide with the aqua Fiveplex dots.
-      div: ['#762a83', '#9970ab', '#c2a5cf', '#ffffff', '#f3d98c', '#d9a441', '#a8701a'],
+      // Diverging, gold (decline) to purple (growth) with a white midpoint. Not green, which
+      // would collide with the aqua Fiveplex dots. Ordered by increasing population change.
+      div: ['#a8701a', '#d9a441', '#f3d98c', '#ffffff', '#c2a5cf', '#9970ab', '#762a83'],
       nodata: '#b5b5b5',
       fillOpacity: 0.65,
       line: '#8a7886',
@@ -23,7 +23,7 @@
     dark: {
       types: ['#3987e5', '#d95926', '#199e70'],
       ring: '#1b1b1b',
-      div: ['#8a3fa8', '#a86bc4', '#cfa8de', '#ffffff', '#f3e3a0', '#e6cf5a', '#c4ad1f'],
+      div: ['#c4ad1f', '#e6cf5a', '#f3e3a0', '#ffffff', '#cfa8de', '#a86bc4', '#8a3fa8'],
       nodata: '#555555',
       fillOpacity: 0.7,
       line: '#8f7c8b',
