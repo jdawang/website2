@@ -11,13 +11,13 @@
 /_site/
 blog/**/data/
 blog/**/maptiles/
-blog/**/renv/library/
-blog/**/renv/local/
-blog/**/renv/cellar/
-blog/**/renv/lock/
-blog/**/renv/python/
-blog/**/renv/sandbox/
-blog/**/renv/staging/
+**/renv/library/
+**/renv/local/
+**/renv/cellar/
+**/renv/lock/
+**/renv/python/
+**/renv/sandbox/
+**/renv/staging/
 **/index_files/**
 data/
 

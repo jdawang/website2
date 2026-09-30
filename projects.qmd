@@ -1,0 +1,25 @@
+---
+title: "Projects"
+listing:
+  contents:
+    - projects/infill-map/index.qmd
+  sort: "date desc"
+  type: grid
+  categories: false
+  sort-ui: true
+  filter-ui: true
+  fields:
+    - date
+    - title
+    - description
+    - image
+    - image-alt
+    - categories
+  max-description-length: 250
+page-layout: full
+aliases: ["/projects/"]
+title-block-banner: false
+comments: false
+---
+
+Interactive maps and tools built on Edmonton data. For write-ups and analysis, see the [blog](blog.qmd).
