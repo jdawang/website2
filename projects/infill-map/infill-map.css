@@ -636,3 +636,13 @@ body.quarto-dark .jd-popup .jd-muted {
     forced-color-adjust: none;
   }
 }
+
+/* Occupancy filter, under the project types */
+.jd-types .jd-occ {
+  margin-top: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--jd-border);
+}
+.jd-occ-note {
+  margin: 0.05rem 0 0 1.55rem;
+}

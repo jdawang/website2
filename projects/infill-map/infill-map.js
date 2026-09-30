@@ -98,6 +98,7 @@
     step: 'month', // slider granularity: 'month' | 'year'
     mode: 'cum', // 'cum' (everything so far) | 'only' (just this month or year)
     types: new Set(DEFAULT_TYPES),
+    occ: false, // only permits with occupancy granted (completed buildings)
     lrt: true,
     radii: new Set(DEFAULT_RADII), // subset of {400, 800}
     sel: null, // pinned neighbourhood id
@@ -122,32 +123,38 @@
     const N = feats.length;
     const idIndex = new Map(feats.map((f, i) => [f.properties.id, i]));
 
-    const raw = { p: new Int32Array(N * T * M), u: new Int32Array(N * T * M), pm: new Int32Array(N * T * M) };
     const at = (n, t, m) => (n * T + t) * M + m;
-    for (let r = 0; r < facts.id.length; r++) {
-      const n = idIndex.get(facts.id[r]);
-      if (n === undefined) continue;
-      const k = at(n, facts.t[r], facts.m[r]);
-      raw.p[k] += facts.p[r];
-      raw.u[k] += facts.u[r];
-      raw.pm[k] += facts.pm[r];
-    }
-    const cum = { p: new Int32Array(raw.p), u: new Int32Array(raw.u), pm: new Int32Array(raw.pm) };
-    for (let n = 0; n < N; n++)
-      for (let t = 0; t < T; t++)
-        for (let m = 1; m < M; m++) {
-          const k = at(n, t, m);
-          cum.p[k] += cum.p[k - 1];
-          cum.u[k] += cum.u[k - 1];
-          cum.pm[k] += cum.pm[k - 1];
-        }
+    // Prefix sums over months, per neighbourhood and type. `cols` names the three fact
+    // columns (permits, homes, mapped permits) to accumulate.
+    const buildCube = (cols) => {
+      const cube = { p: new Int32Array(N * T * M), u: new Int32Array(N * T * M), pm: new Int32Array(N * T * M) };
+      for (let r = 0; r < facts.id.length; r++) {
+        const n = idIndex.get(facts.id[r]);
+        if (n === undefined) continue;
+        const k = at(n, facts.t[r], facts.m[r]);
+        cube.p[k] += facts[cols[0]][r];
+        cube.u[k] += facts[cols[1]][r];
+        cube.pm[k] += facts[cols[2]][r];
+      }
+      for (let n = 0; n < N; n++)
+        for (let t = 0; t < T; t++)
+          for (let m = 1; m < M; m++) {
+            const k = at(n, t, m);
+            cube.p[k] += cube.p[k - 1];
+            cube.u[k] += cube.u[k - 1];
+            cube.pm[k] += cube.pm[k - 1];
+          }
+      return cube;
+    };
+    const cum = buildCube(['p', 'u', 'pm']);
+    const cumOcc = buildCube(['po', 'uo', 'pmo']); // permits with occupancy granted
 
     // Permit points as GeoJSON, built once from the column arrays.
     const pts = [];
     for (let i = 0; i < permits.t.length; i++) {
       pts.push({
         type: 'Feature',
-        properties: { t: permits.t[i], m: permits.m[i], u: permits.u[i], i: permits.i[i], q: permits.q[i], a: permits.a[i] },
+        properties: { t: permits.t[i], m: permits.m[i], u: permits.u[i], o: permits.o[i], i: permits.i[i], q: permits.q[i], a: permits.a[i] },
         geometry: { type: 'Point', coordinates: [permits.x0 + permits.x[i] / permits.s, permits.y0 + permits.y[i] / permits.s] },
       });
     }
@@ -155,7 +162,7 @@
     const months = Array.from({ length: M }, (_, m) => new Date(2024, m, 1));
 
     return {
-      meta, M, T, N, feats, idIndex, raw, cum, at, months,
+      meta, M, T, N, feats, idIndex, cum, cumOcc, at, months,
       permitsFC: { type: 'FeatureCollection', features: pts },
       nbhdFC: nbhd,
       lrtFC: lrt,
@@ -163,6 +170,8 @@
     };
   }
 
+  // YYYYMM integer (as stored in permits.json) to "Mar 2026".
+  const monthYearFromYm = (ym) => new Date(Math.floor(ym / 100), (ym % 100) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   const monthShort = (m) => D.months[m].toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 
   // ---- time window -------------------------------------------------------------
@@ -194,17 +203,18 @@
   // Sum over active types for one neighbourhood (index n), from the prefix-sum cube.
   function nbAgg(n, types = state.types) {
     const start = rangeStart();
+    const cube = state.occ ? D.cumOcc : D.cum;
     let p = 0, u = 0, pm = 0;
     for (const t of types) {
       const k = D.at(n, t, state.month);
-      p += D.cum.p[k];
-      u += D.cum.u[k];
-      pm += D.cum.pm[k];
+      p += cube.p[k];
+      u += cube.u[k];
+      pm += cube.pm[k];
       if (start > 0) {
         const k0 = D.at(n, t, start - 1);
-        p -= D.cum.p[k0];
-        u -= D.cum.u[k0];
-        pm -= D.cum.pm[k0];
+        p -= cube.p[k0];
+        u -= cube.u[k0];
+        pm -= cube.pm[k0];
       }
     }
     return { p, u, pm };
@@ -217,6 +227,7 @@
       ['>=', ['get', 'm'], rangeStart()],
       ['<=', ['get', 'm'], state.month],
       ['in', ['get', 't'], ['literal', [...state.types]]],
+      ...(state.occ ? [['>', ['get', 'o'], 0]] : []),
     ];
   }
 
@@ -452,7 +463,7 @@
       dl,
       el('h3', { text: `Permits by type, ${periodInfo().scope}` }),
       byType,
-      el('p', { class: 'jd-note', text: 'Headline numbers follow the type filter; the breakdown always shows all three. Population growth is only available for neighbourhoods counted in 1971.' }),
+      el('p', { class: 'jd-note', text: 'Headline numbers follow the type filter; the breakdown always shows all three. Both follow the occupancy filter when it is on. Population growth is only available for neighbourhoods counted in 1971.' }),
     );
     $('jd-panel').hidden = false;
     $('jd-app').classList.add('jd-panel-open');
@@ -573,6 +584,7 @@
         el('strong', { text: p.a }),
         el('div', { text: `${D.meta.types[p.t]} · ${p.u} ${p.u === 1 ? 'home' : 'homes'}` }),
         el('div', { class: 'jd-muted', text: `${monthShort(p.m)}${nb ? ' · ' + nb.properties.nm : ''}` }),
+        el('div', { class: 'jd-muted', text: p.o > 0 ? `Occupancy granted ${monthYearFromYm(p.o)}` : 'Occupancy not yet granted' }),
         p.q === 1 ? el('div', { class: 'jd-muted', text: 'Location from the property address record (approximate).' }) : null,
       ));
     }
@@ -599,6 +611,7 @@
         `t=${[...state.types].sort().join(',')}`,
         state.step === 'year' ? 'step=year' : null,
         state.mode === 'only' ? 'mode=only' : null,
+        state.occ ? 'occ=1' : null,
         state.lrt ? null : 'lrt=0',
         // Only written when it differs from the default; `r=` alone means both rings off.
         [...state.radii].sort().join(',') === DEFAULT_RADII.join(',') ? null : `r=${[...state.radii].sort().join(',')}`,
@@ -622,6 +635,7 @@
     }
     if (params.get('step') === 'year') out.step = 'year';
     if (params.get('mode') === 'only') out.mode = 'only';
+    if (params.get('occ') === '1') out.occ = true;
     if (params.get('lrt') === '0') out.lrt = false;
     if (params.has('r')) {
       out.radii = new Set(params.get('r').split(',').map(Number).filter((x) => x === 400 || x === 800));
@@ -658,6 +672,10 @@
         state.month = Math.min(D.M - 1, (year - 2024) * 12 + 11);
         scheduleUpdate(true);
       }));
+    $('jd-occ').addEventListener('change', (e) => {
+      state.occ = e.target.checked;
+      scheduleUpdate(true);
+    });
     document.querySelectorAll('input[name="jd-step"]').forEach((r) =>
       r.addEventListener('change', () => {
         stopPlay();
@@ -706,6 +724,7 @@
     $('jd-drawer-close').addEventListener('click', () => ($('jd-drawer').hidden = true));
     if (window.matchMedia('(max-width: 820px)').matches) $('jd-collapse').click();
     buildMethods();
+    $('jd-occ-note').textContent = `Completed builds only. Permits take about ${Math.round(D.meta.occ_median_lag_days / 30.4)} months to reach occupancy, so recent ones rarely show.`;
   }
 
   // Legend for the line colours, read from the data so it can't drift from the map.
@@ -741,13 +760,14 @@
     document.querySelector(`input[name="jd-mode"][value="${state.mode}"]`).checked = true;
     document.querySelector(`input[name="jd-step"][value="${state.step}"]`).checked = true;
     $('jd-lrt').checked = state.lrt;
+    $('jd-occ').checked = state.occ;
     syncTransitControls();
     applyStepUI();
   }
 
   function resetAll() {
     stopPlay();
-    Object.assign(state, { month: D.M - 1, step: 'month', mode: 'cum', types: new Set(DEFAULT_TYPES), lrt: true, radii: new Set(DEFAULT_RADII) });
+    Object.assign(state, { month: D.M - 1, step: 'month', mode: 'cum', types: new Set(DEFAULT_TYPES), occ: false, lrt: true, radii: new Set(DEFAULT_RADII) });
     setSelected(null);
     syncControls();
     applyTransit();
@@ -793,6 +813,7 @@
       'LRT: existing lines are from the City of Edmonton transit feed. Lines under construction are drawn from OpenStreetMap as mapped, so they are approximate and may differ from the final route. The 400 m and 800 m distances are straight-line from every stop, existing and planned.',
       '% of RS lots redeveloped is permits divided by RS-zoned properties in the neighbourhood. A lot with more than one permit is counted more than once.',
       'Shading and population growth compare the 2021 census with the 1971 census. The 1971 counts only cover established neighbourhoods, so newer ones are grey on the map and show n/a. Very large increases (over 200%) are mostly areas that were farmland or barely built in 1971, so the percentage is large even when the change is modest in absolute terms.',
+      `Occupancy granted means the City has recorded an occupancy date for the permit, so the building is complete. That is ${fmtInt(m.n_occ)} of ${fmtInt(m.n_total)} permits (${Math.round((100 * m.n_occ) / m.n_total)}%). The median gap from permit to occupancy is about ${Math.round(m.occ_median_lag_days / 30.4)} months, so recent permits rarely have it yet and the filter understates the newest activity. ${m.occ_before_issue} permits record an occupancy date before their issue date (likely re-issued permits); they count as granted. The time slider still runs on the permit issue date.`,
       `Data as of ${m.as_of}; map built ${m.built}.`,
     ];
     $('jd-method').replaceChildren(...items.map((t) => el('li', { text: t })));

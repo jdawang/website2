@@ -74,7 +74,10 @@ permits <- bp_raw |>
     neighbourhood = fix_name(neighbourhood),
     t = as.integer(factor(project_type, levels = TYPES)) - 1L,
     m = as.integer((year - START_YEAR) * 12 + month_number - 1),
-    has_geom = !st_is_empty(geometry)
+    has_geom = !st_is_empty(geometry),
+    # Occupancy granted = the building is complete. YYYYMM of the date, 0 if none recorded.
+    occ_ym = if_else(is.na(occupancy_granted_date), 0L, as.integer(year(occupancy_granted_date) * 100 + month(occupancy_granted_date))),
+    occ = occ_ym > 0L
   )
 message("permits in scope: ", nrow(permits), "; units: ", sum(permits$units_added))
 stopifnot(!anyNA(permits$neighbourhood), all(permits$m %in% 0:(N_MONTHS - 1)))
@@ -367,10 +370,13 @@ permits_json <- list(
     n_total = nrow(pts),
     n_mapped = nrow(mapped),
     units_total = sum(pts$units_added),
+    n_occ = sum(pts$occ),
+    occ_median_lag_days = as.integer(median(as.numeric(pts$occupancy_granted_date - pts$date_issued)[pts$occ])),
+    occ_before_issue = sum(pts$occupancy_granted_date < pts$date_issued, na.rm = TRUE),
     geo_src_counts = list(permit = sum(mapped$q == 0), address = sum(mapped$q == 1))
   ),
   x0 = x0, y0 = y0, s = S,
-  t = mapped$t, m = mapped$m, u = as.integer(mapped$units_added),
+  t = mapped$t, m = mapped$m, u = as.integer(mapped$units_added), o = mapped$occ_ym,
   i = mapped$id, q = mapped$q,
   x = as.integer(round((mapped$lon - x0) * S)),
   y = as.integer(round((mapped$lat - y0) * S)),
@@ -379,7 +385,12 @@ permits_json <- list(
 
 facts <- pts |>
   group_by(id, t, m) |>
-  summarize(p = n(), u = as.integer(sum(units_added)), pm = sum(!is.na(q)), .groups = "drop") |>
+  summarize(
+    p = n(), u = as.integer(sum(units_added)), pm = sum(!is.na(q)),
+    # the same three counts restricted to permits with occupancy granted
+    po = sum(occ), uo = as.integer(sum(units_added[occ])), pmo = sum(occ & !is.na(q)),
+    .groups = "drop"
+  ) |>
   arrange(id, t, m)
 facts_json <- lapply(as.list(facts), as.integer)
 
@@ -388,11 +399,12 @@ stopifnot(
   "facts permits != permits" = sum(facts$p) == nrow(pts),
   "facts units != units" = sum(facts$u) == sum(pts$units_added),
   "facts mapped != mapped" = sum(facts$pm) == nrow(mapped),
+  "facts occupancy != occupancy" = sum(facts$po) == sum(pts$occ) && sum(facts$uo) == sum(pts$units_added[pts$occ]) && sum(facts$pmo) == sum(mapped$occ),
   "coords outside Edmonton" = all(
     between(mapped$lon, EDMONTON_BBOX[["xmin"]], EDMONTON_BBOX[["xmax"]]),
     between(mapped$lat, EDMONTON_BBOX[["ymin"]], EDMONTON_BBOX[["ymax"]])
   ),
-  "arrays not aligned" = length(unique(lengths(permits_json[c("t", "m", "u", "i", "q", "x", "y", "a")]))) == 1,
+  "arrays not aligned" = length(unique(lengths(permits_json[c("t", "m", "u", "o", "i", "q", "x", "y", "a")]))) == 1,
   "ids not integer" = is.integer(neighbourhoods$id)
 )
 
