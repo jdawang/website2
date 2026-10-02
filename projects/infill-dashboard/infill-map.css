@@ -222,6 +222,10 @@ body.quarto-dark #jd-app {
 .jd-line-swatch.jd-dashed {
   border-top-style: dashed;
 }
+.jd-line-swatch.jd-bus {
+  border-top-color: var(--jd-bus-ink, #6b5b4b);
+  border-top-width: 3px;
+}
 .jd-line-swatch.jd-thick {
   border-top-width: 3px;
 }
@@ -346,9 +350,8 @@ input[type="radio"] {
   max-width: 46rem;
 }
 
-/* ---- neighbourhood panel and table drawer --------------------------------- */
-#jd-panel,
-#jd-drawer {
+/* ---- neighbourhood panel and table view ------------------------------------ */
+#jd-panel {
   top: 132px;
   right: 12px;
   width: 320px;
@@ -356,11 +359,51 @@ input[type="radio"] {
   overflow-y: auto;
   padding: 0.75rem 0.85rem;
 }
-#jd-drawer {
-  width: min(760px, calc(100% - 24px));
-  top: 12px;
-  max-height: calc(100% - 24px);
-  z-index: 4;
+#jd-tableview {
+  top: 84px;
+  left: 324px;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0.85rem;
+  z-index: 2;
+}
+#jd-tableview[hidden] {
+  display: none;
+}
+.jd-tv-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.jd-tv-toolbar input[type="search"],
+.jd-tv-toolbar select {
+  font: inherit;
+  color: inherit;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--jd-border);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  min-width: 0;
+}
+.jd-tv-toolbar input[type="search"] {
+  width: 14rem;
+}
+.jd-view-switch {
+  display: flex;
+  gap: 1rem;
+}
+/* Table view hides the map and everything that only applies to it. */
+#jd-app.jd-view-table #jd-map,
+#jd-app.jd-view-table .jd-map-only,
+#jd-app.jd-view-table #jd-panel,
+#jd-app.jd-view-table #jd-error {
+  display: none;
+}
+#jd-app.jd-view-table {
+  background: var(--bs-body-bg);
 }
 .jd-panel-head {
   display: flex;
@@ -421,6 +464,8 @@ input[type="radio"] {
 .jd-table-wrap {
   overflow: auto;
   margin-top: 0.5rem;
+  flex: 1;
+  min-height: 0;
 }
 #jd-table {
   width: 100%;
@@ -438,7 +483,9 @@ input[type="radio"] {
 #jd-table th:first-child,
 #jd-table td:first-child,
 #jd-table th:nth-child(2),
-#jd-table td:nth-child(2) {
+#jd-table td:nth-child(2),
+#jd-table th:nth-child(3),
+#jd-table td:nth-child(3) {
   text-align: left;
 }
 #jd-table th {
@@ -581,8 +628,16 @@ body.quarto-dark .jd-popup .jd-muted {
   .jd-disclosure {
     display: none;
   }
-  #jd-panel,
-  #jd-drawer {
+  #jd-tableview {
+    top: 64px;
+    left: 8px;
+    right: 8px;
+    bottom: 150px;
+  }
+  .jd-tv-toolbar input[type="search"] {
+    width: 100%;
+  }
+  #jd-panel {
     top: auto;
     bottom: 0;
     left: 0;
@@ -591,9 +646,6 @@ body.quarto-dark .jd-popup .jd-muted {
     max-height: 62%;
     border-radius: 14px 14px 0 0;
     z-index: 4;
-  }
-  #jd-drawer {
-    max-height: 80%;
   }
   #jd-app.jd-panel-open #jd-controls {
     visibility: hidden;
@@ -642,7 +694,4 @@ body.quarto-dark .jd-popup .jd-muted {
   margin-top: 0.35rem;
   padding-top: 0.4rem;
   border-top: 1px solid var(--jd-border);
-}
-.jd-occ-note {
-  margin: 0.05rem 0 0 1.55rem;
 }

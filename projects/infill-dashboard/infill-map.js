@@ -18,6 +18,7 @@
       line: '#8a7886',
       sel: '#663f5f',
       lrt: '#2b2b2b',
+      bus: '#6b5b4b',
       halo: '#ffffff',
     },
     dark: {
@@ -29,6 +30,7 @@
       line: '#8f7c8b',
       sel: '#c79dbf',
       lrt: '#f0f0ee',
+      bus: '#c9bba9',
       halo: '#f0f0ee', // light halo so the official route colours stay visible on the dark basemap
     },
   };
@@ -100,7 +102,10 @@
     types: new Set(DEFAULT_TYPES),
     occ: false, // only permits with occupancy granted (completed buildings)
     lrt: true,
+    fbus: true, // frequent bus network (routes 1-9)
+    fbusR: true, // its 400 m distance ring
     radii: new Set(DEFAULT_RADII), // subset of {400, 800}
+    tab: 'map', // 'map' | 'table'
     sel: null, // pinned neighbourhood id
     hover: null,
   };
@@ -113,9 +118,10 @@
   let playTimer = null;
   let popup = null;
   let sortState = { key: 'p', dir: -1 };
+  const tableFilter = { q: '', type: '' };
 
   // ---- data derivation ---------------------------------------------------------
-  function derive(permits, facts, nbhd, lrt) {
+  function derive(permits, facts, nbhd, lrt, fbus) {
     const meta = permits.meta;
     const M = meta.n_months;
     const T = meta.types.length;
@@ -166,6 +172,7 @@
       permitsFC: { type: 'FeatureCollection', features: pts },
       nbhdFC: nbhd,
       lrtFC: lrt,
+      fbusFC: fbus,
       rsTotal: feats.reduce((s, f) => s + f.properties.rs, 0),
     };
   }
@@ -277,6 +284,36 @@
       },
     }, before);
 
+    // Frequent bus sits under the LRT layers: ring, route line, then stops (zoomed in only).
+    map.addSource('jd-fbus-buffers', { type: 'geojson', data: D.fbusFC.buffers });
+    map.addSource('jd-fbus-lines', { type: 'geojson', data: D.fbusFC.lines });
+    map.addSource('jd-fbus', { type: 'geojson', data: D.fbusFC.stops });
+    map.addLayer({
+      id: 'jd-fbus-buf-halo', type: 'line', source: 'jd-fbus-buffers',
+      layout: { 'line-join': 'round' }, paint: { 'line-color': p.ring, 'line-width': 4, 'line-opacity': 0.7 },
+    }, beforeTop);
+    map.addLayer({
+      id: 'jd-fbus-buf', type: 'line', source: 'jd-fbus-buffers',
+      paint: { 'line-color': p.bus, 'line-width': 1.5, 'line-opacity': 0.95 },
+    }, beforeTop);
+    map.addLayer({
+      id: 'jd-fbus-line-casing', type: 'line', source: 'jd-fbus-lines', layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': p.halo, 'line-opacity': 0.85, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.5, 15, 5.5] },
+    }, beforeTop);
+    map.addLayer({
+      id: 'jd-fbus-line', type: 'line', source: 'jd-fbus-lines', layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': p.bus, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.25, 15, 3] },
+    }, beforeTop);
+    map.addLayer({
+      id: 'jd-fbus-stop', type: 'circle', source: 'jd-fbus', minzoom: 12,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 15, 3],
+        'circle-color': p.bus,
+        'circle-stroke-color': p.halo,
+        'circle-stroke-width': 0.75,
+      },
+    }, beforeTop);
+
     // LRT: radii, then the line (casing under it), then stops. Layers go before the
     // basemap's labels, in this order, so later ones sit on top of earlier ones.
     map.addSource('jd-lrt-buffers', { type: 'geojson', data: D.lrtFC.buffers });
@@ -359,6 +396,8 @@
   function applyTransit() {
     if (!map || !map.getLayer('jd-lrt-stop')) return;
     const vis = (on) => (on ? 'visible' : 'none');
+    for (const id of ['jd-fbus-line-casing', 'jd-fbus-line', 'jd-fbus-stop']) map.setLayoutProperty(id, 'visibility', vis(state.fbus));
+    for (const id of ['jd-fbus-buf', 'jd-fbus-buf-halo']) map.setLayoutProperty(id, 'visibility', vis(state.fbus && state.fbusR));
     for (const id of ['jd-lrt-stop', 'jd-lrt-line-casing', 'jd-lrt-line', 'jd-lrt-line-future-casing', 'jd-lrt-line-future']) {
       map.setLayoutProperty(id, 'visibility', vis(state.lrt));
     }
@@ -432,7 +471,7 @@
 
     const active = state.hover != null && !state.sel ? state.hover : state.sel;
     if (active != null) renderPanel(active);
-    if (!$('jd-drawer').hidden) renderTable();
+    if (state.tab === 'table') renderTable();
     writeHash();
   }
 
@@ -497,19 +536,26 @@
     writeHash();
   }
 
-  // ---- table drawer ------------------------------------------------------------
+  // ---- table view --------------------------------------------------------------
   const COLUMNS = [
-    ['nm', 'Neighbourhood'], ['wd', 'Ward'], ['p', 'Permits'], ['u', 'Homes'],
-    ['rs', 'RS lots'], ['pct', '% redeveloped'], ['p21', 'Pop. 2021'], ['pg', 'vs. 1971'],
+    ['nm', 'Neighbourhood'], ['wd', 'Ward'], ['ty', 'Type'], ['p', 'Permits'], ['u', 'Homes'],
+    ['rs', 'RS lots'], ['pct', '% redeveloped'], ['p71', 'Pop. 1971'], ['p21', 'Pop. 2021'], ['pg', 'vs. 1971'],
   ];
-  function renderTable() {
+  const TEXT_COLS = new Set(['nm', 'wd', 'ty']);
+
+  // Rows for the current period, type and occupancy filters, then the search box and
+  // type select, sorted by the active column.
+  function tableRows() {
+    const q = tableFilter.q.trim().toLowerCase();
     const rows = D.feats
       .map((feat, n) => {
         const f = feat.properties;
         const a = nbAgg(n);
-        return { id: f.id, nm: f.nm, wd: f.wd, p: a.p, u: a.u, rs: f.rs, pct: f.rs > 0 ? a.p / f.rs : null, p21: f.p21, pg: f.pg, pt: f.pt };
+        return { id: f.id, nm: f.nm, wd: f.wd, ty: f.ty, p: a.p, u: a.u, rs: f.rs, pct: f.rs > 0 ? a.p / f.rs : null, p71: f.p71, p21: f.p21, pg: f.pg, pt: f.pt };
       })
-      .filter((r) => r.pt > 0);
+      .filter((r) => r.pt > 0)
+      .filter((r) => !q || r.nm.toLowerCase().includes(q))
+      .filter((r) => !tableFilter.type || r.ty === tableFilter.type);
     const { key, dir } = sortState;
     rows.sort((x, y) => {
       const a = x[key], b = y[key];
@@ -518,36 +564,73 @@
       if (b == null) return -1;
       return (typeof a === 'string' ? a.localeCompare(b) : a - b) * dir;
     });
+    return rows;
+  }
+
+  function renderTable() {
+    const rows = tableRows();
+    const { key, dir } = sortState;
+    $('jd-row-count').textContent = `${fmtInt(rows.length)} neighbourhoods`;
     const head = el('tr', {}, ...COLUMNS.map(([k, label]) => {
-      const th = el('th', { scope: 'col', 'aria-sort': sortState.key === k ? (dir > 0 ? 'ascending' : 'descending') : 'none' });
+      const th = el('th', { scope: 'col', 'aria-sort': key === k ? (dir > 0 ? 'ascending' : 'descending') : 'none' });
       th.append(el('button', {
-        type: 'button', text: label + (sortState.key === k ? (dir > 0 ? ' ▲' : ' ▼') : ''),
+        type: 'button', text: label + (key === k ? (dir > 0 ? ' ▲' : ' ▼') : ''),
         onclick: () => {
-          sortState = { key: k, dir: sortState.key === k ? -sortState.dir : (k === 'nm' || k === 'wd' ? 1 : -1) };
+          sortState = { key: k, dir: key === k ? -dir : (TEXT_COLS.has(k) ? 1 : -1) };
           renderTable();
         },
       }));
       return th;
     }));
     const body = rows.map((r) => el('tr', {},
-      el('td', {}, el('button', { type: 'button', text: r.nm, onclick: () => selectFromTable(r.id) })),
+      el('td', {}, el('button', { type: 'button', text: r.nm, title: 'Show on the map', onclick: () => selectFromTable(r.id) })),
       el('td', { text: r.wd || '' }),
+      el('td', { text: r.ty || '' }),
       el('td', { text: fmtInt(r.p) }),
       el('td', { text: fmtInt(r.u) }),
       el('td', { text: fmtInt(r.rs) }),
       el('td', { text: fmtPct(r.pct, 1) }),
+      el('td', { text: r.p71 == null ? 'n/a' : fmtInt(r.p71) }),
       el('td', { text: r.p21 == null ? 'n/a' : fmtInt(r.p21) }),
       el('td', { text: fmtSigned(r.pg) }),
     ));
-    const table = el('table', { id: 'jd-table' }, el('thead', {}, head), el('tbody', {}, ...body));
-    $('jd-table-host').replaceChildren(table);
+    $('jd-table-host').replaceChildren(el('table', { id: 'jd-table' }, el('thead', {}, head), el('tbody', {}, ...body)));
+  }
+
+  function downloadCsv() {
+    const esc = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+    const cols = [['nm', 'Neighbourhood'], ['wd', 'Ward'], ['ty', 'Type'], ['p', 'Permits'], ['u', 'Homes added'], ['rs', 'RS properties'], ['pct', 'Share of RS lots redeveloped'], ['p71', 'Population 1971'], ['p21', 'Population 2021'], ['pg', 'Population change vs 1971']];
+    const lines = [cols.map(([, h]) => esc(h)).join(',')];
+    for (const r of tableRows()) lines.push(cols.map(([k]) => esc(k === 'pct' && r.pct != null ? r.pct.toFixed(4) : r[k])).join(','));
+    const types = [...state.types].sort().map((t) => D.meta.types[t]).join(' + ');
+    lines.push('', esc(`${periodInfo().label}; ${types}${state.occ ? '; occupancy granted only' : ''}; data as of ${D.meta.as_of}`));
+    const a = el('a', { href: URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })), download: 'edmonton-infill-by-neighbourhood.csv' });
+    document.body.append(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  function applyView() {
+    const table = state.tab === 'table';
+    $('jd-app').classList.toggle('jd-view-table', table);
+    $('jd-tableview').hidden = !table;
+    document.querySelector(`input[name="jd-view"][value="${state.tab}"]`).checked = true;
+    if (table) {
+      if (popup) popup.remove();
+      renderTable();
+    } else if (map) {
+      map.resize();
+      if (state.sel != null) renderPanel(state.sel);
+    }
+    writeHash();
   }
 
   function selectFromTable(id) {
+    state.tab = 'map';
+    applyView();
     setSelected(id);
     const f = D.feats[D.idIndex.get(id)];
     const bb = geometryBounds(f.geometry);
-    if (window.matchMedia('(max-width: 820px)').matches) $('jd-drawer').hidden = true;
     map.fitBounds(bb, { padding: { top: 90, bottom: 90, left: 340, right: 360 }, maxZoom: 14.5 });
   }
 
@@ -613,8 +696,11 @@
         state.mode === 'only' ? 'mode=only' : null,
         state.occ ? 'occ=1' : null,
         state.lrt ? null : 'lrt=0',
+        state.fbus ? null : 'bus=0',
+        state.fbus && !state.fbusR ? 'br=0' : null,
         // Only written when it differs from the default; `r=` alone means both rings off.
         [...state.radii].sort().join(',') === DEFAULT_RADII.join(',') ? null : `r=${[...state.radii].sort().join(',')}`,
+        state.tab === 'table' ? 'view=table' : null,
         state.sel != null ? `nb=${state.sel}` : null,
         `v=${map.getZoom().toFixed(2)}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}`,
       ].filter(Boolean);
@@ -637,9 +723,12 @@
     if (params.get('mode') === 'only') out.mode = 'only';
     if (params.get('occ') === '1') out.occ = true;
     if (params.get('lrt') === '0') out.lrt = false;
+    if (params.get('bus') === '0') out.fbus = false;
+    if (params.get('br') === '0') out.fbusR = false;
     if (params.has('r')) {
       out.radii = new Set(params.get('r').split(',').map(Number).filter((x) => x === 400 || x === 800));
     }
+    if (params.get('view') === 'table') out.tab = 'table';
     const nb = parseInt(params.get('nb'), 10);
     if (D.idIndex.has(nb)) out.sel = nb;
     const v = (params.get('v') || '').split('/').map(Number);
@@ -695,6 +784,17 @@
       applyTransit();
       writeHash();
     });
+    $('jd-fbus').addEventListener('change', (e) => {
+      state.fbus = e.target.checked;
+      syncTransitControls();
+      applyTransit();
+      writeHash();
+    });
+    $('jd-fbus-r').addEventListener('change', (e) => {
+      state.fbusR = e.target.checked;
+      applyTransit();
+      writeHash();
+    });
     document.querySelectorAll('.jd-radius').forEach((cb) =>
       cb.addEventListener('change', () => {
         const r = +cb.value;
@@ -721,10 +821,19 @@
       setTimeout(() => (b.textContent = 'Copy link'), 1500);
     });
     $('jd-panel-close').addEventListener('click', () => setSelected(null));
-    $('jd-drawer-close').addEventListener('click', () => ($('jd-drawer').hidden = true));
+    document.querySelectorAll('input[name="jd-view"]').forEach((r) =>
+      r.addEventListener('change', () => {
+        state.tab = r.value;
+        applyView();
+      }));
+    const tf = $('jd-type-filter');
+    tf.replaceChildren(el('option', { value: '', text: 'All neighbourhood types' }),
+      ...[...new Set(D.feats.map((f) => f.properties.ty).filter(Boolean))].sort().map((t) => el('option', { value: t, text: t })));
+    tf.addEventListener('change', () => { tableFilter.type = tf.value; renderTable(); });
+    $('jd-search').addEventListener('input', (e) => { tableFilter.q = e.target.value; renderTable(); });
+    $('jd-csv').addEventListener('click', downloadCsv);
     if (window.matchMedia('(max-width: 820px)').matches) $('jd-collapse').click();
     buildMethods();
-    $('jd-occ-note').textContent = `Completed builds only. Permits take about ${Math.round(D.meta.occ_median_lag_days / 30.4)} months to reach occupancy, so recent ones rarely show.`;
   }
 
   // Legend for the line colours, read from the data so it can't drift from the map.
@@ -741,6 +850,8 @@
       cb.checked = state.radii.has(+cb.value);
       cb.disabled = !state.lrt;
     });
+    $('jd-fbus-r').checked = state.fbusR;
+    $('jd-fbus-r').disabled = !state.fbus;
   }
 
   // Slider range, tick labels, year chips and the "only" label depend on the step size.
@@ -760,16 +871,20 @@
     document.querySelector(`input[name="jd-mode"][value="${state.mode}"]`).checked = true;
     document.querySelector(`input[name="jd-step"][value="${state.step}"]`).checked = true;
     $('jd-lrt').checked = state.lrt;
+    $('jd-fbus').checked = state.fbus;
     $('jd-occ').checked = state.occ;
     syncTransitControls();
     applyStepUI();
+    $('jd-search').value = tableFilter.q = '';
+    $('jd-type-filter').value = tableFilter.type = '';
   }
 
   function resetAll() {
     stopPlay();
-    Object.assign(state, { month: D.M - 1, step: 'month', mode: 'cum', types: new Set(DEFAULT_TYPES), occ: false, lrt: true, radii: new Set(DEFAULT_RADII) });
+    Object.assign(state, { tab: 'map', month: D.M - 1, step: 'month', mode: 'cum', types: new Set(DEFAULT_TYPES), occ: false, lrt: true, fbus: true, fbusR: true, radii: new Set(DEFAULT_RADII) });
     setSelected(null);
     syncControls();
+    applyView();
     applyTransit();
     map.easeTo(defaultView());
     scheduleUpdate(true);
@@ -810,6 +925,7 @@
       `Scope: ${fmtInt(m.n_total)} residential permits issued from January 2024 to ${m.as_of}, in RS-zoned lots, adding a backyard house, or two to eight homes. Excavation permits are excluded.`,
       `Location: ${fmtInt(g.permit)} permits are plotted at their own coordinates and ${fmtInt(g.address)} are matched by address to the City's property roll (${m.property_snapshot} snapshot). Those sit at the centre of the parcel, so they can be tens of metres off. ${fmtInt(m.n_total - m.n_mapped)} could not be located.`,
       'Neighbourhood totals and every number in the stat strip use all permits, including the ones with no location.',
+      'Frequent bus: ETS Frequent Network routes 1 to 9, at stops with scheduled service every 15 minutes or better between 6 am and 9 pm (City of Edmonton transit feed, 2023-11-09 service day). The line is drawn only where it serves those stops, and the 400 m distance is straight-line from each stop.',
       'LRT: existing lines are from the City of Edmonton transit feed. Lines under construction are drawn from OpenStreetMap as mapped, so they are approximate and may differ from the final route. The 400 m and 800 m distances are straight-line from every stop, existing and planned.',
       '% of RS lots redeveloped is permits divided by RS-zoned properties in the neighbourhood. A lot with more than one permit is counted more than once.',
       'Shading and population growth compare the 2021 census with the 1971 census. The 1971 counts only cover established neighbourhoods, so newer ones are grey on the map and show n/a. Very large increases (over 200%) are mostly areas that were farmland or barely built in 1971, so the percentage is large even when the change is modest in absolute terms.',
@@ -827,6 +943,7 @@
     lastDark = isDark();
     const p = pal();
     $('jd-app').style.setProperty('--jd-lrt-ink', p.lrt);
+    $('jd-app').style.setProperty('--jd-bus-ink', p.bus);
     p.types.forEach((c, i) => document.querySelectorAll(`[data-swatch="${i}"]`).forEach((s) => (s.style.background = c)));
     const ramp = $('jd-legend-ramp');
     const colours = [...p.div, p.nodata];
@@ -844,7 +961,7 @@
     onAdd() {
       this.el = el('div', { class: 'maplibregl-ctrl maplibregl-ctrl-group' },
         el('button', { type: 'button', class: 'jd-ctrl-btn', title: 'About this map', 'aria-label': 'About this map', text: 'i', onclick: () => $('jd-about').showModal() }),
-        el('button', { type: 'button', class: 'jd-ctrl-btn', title: 'View as table', 'aria-label': 'View all neighbourhoods as a table', text: '☰', onclick: () => { $('jd-drawer').hidden = !$('jd-drawer').hidden; if (!$('jd-drawer').hidden) renderTable(); } }),
+        el('button', { type: 'button', class: 'jd-ctrl-btn', title: 'View as table', 'aria-label': 'View all neighbourhoods as a table', text: '☰', onclick: () => { state.tab = 'table'; applyView(); } }),
       );
       return this.el;
     }
@@ -859,11 +976,12 @@
   // ---- boot --------------------------------------------------------------------
   async function init() {
     if (typeof maplibregl === 'undefined') throw new Error('The map library failed to load. Check your connection and reload.');
-    const [permits, facts, nbhd, stops, lines, buffers] = await Promise.all([
+    const [permits, facts, nbhd, stops, lines, buffers, bStops, bLines, bBuffers] = await Promise.all([
       loadJSON('permits.json'), loadJSON('neighbourhood-facts.json'), loadJSON('neighbourhoods.geojson'),
       loadJSON('lrt.geojson'), loadJSON('lrt-lines.geojson'), loadJSON('lrt-buffers.geojson'),
+      loadJSON('fbus-stops.geojson'), loadJSON('fbus-lines.geojson'), loadJSON('fbus-buffers.geojson'),
     ]);
-    D = derive(permits, facts, nbhd, { stops, lines, buffers });
+    D = derive(permits, facts, nbhd, { stops, lines, buffers }, { stops: bStops, lines: bLines, buffers: bBuffers });
     state.month = D.M - 1;
     const fromHash = readHash();
     Object.assign(state, fromHash);
@@ -888,6 +1006,7 @@
     buildControls();
     buildLineKey();
     syncControls();
+    applyView();
     applyTheme();
 
     map.on('style.load', () => {
@@ -921,8 +1040,7 @@
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || $('jd-about').open) return;
-      if (!$('jd-drawer').hidden) $('jd-drawer').hidden = true;
-      else if (state.sel != null) setSelected(null);
+      if (state.tab === 'map' && state.sel != null) setSelected(null);
     });
 
     new MutationObserver(applyTheme).observe(document.body, { attributes: true, attributeFilter: ['class'] });

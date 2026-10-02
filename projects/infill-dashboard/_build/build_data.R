@@ -1,7 +1,7 @@
 # Build the static data files for the infill map page (../index.qmd).
 #
 # Run manually each quarter, from this directory:
-#   cd projects/infill-map/_build && Rscript build_data.R
+#   cd projects/infill-dashboard/_build && Rscript build_data.R
 #
 # Reads the gitignored shared data/ dir and the permit cache, and writes small
 # committed JSON files one level up. The page itself has no R, so CI never runs
@@ -354,6 +354,43 @@ stopifnot(
   "every line feature needs a colour" = !anyNA(lrt_lines$colour)
 )
 
+# ---- 4b. frequent bus network --------------------------------------------------
+# Same stops as the Q3 building permits post: routes 1-9 with scheduled 15-minute
+# headways, 6 am to 9 pm, on the 2023-11-09 service day.
+fbus <- get_edmonton_frequent_bus_stops(
+  gtfs_path = file.path(DATA, "ca-alberta-edmonton-transit-system-gtfs-714.zip"),
+  service_date = as.Date("2023-11-09"),
+  crs = METRIC
+)
+fbus_route_ids <- gtfs$routes |>
+  filter(route_short_name %in% sprintf("%03d", 1:9)) |>
+  pull(route_id)
+fbus_shapes <- tidytransit::shapes_as_sf(gtfs$shapes) |>
+  inner_join(distinct(filter(gtfs$trips, route_id %in% fbus_route_ids), shape_id), by = "shape_id") |>
+  st_transform(METRIC)
+# Route 1 branches (1A/1B) run every ~30 minutes and have no frequent stops of their
+# own, so keep only the part of each route within 250 m of a frequent stop.
+fbus_line <- fbus_shapes |>
+  st_union() |>
+  st_line_merge() |>
+  st_intersection(st_union(st_buffer(fbus, 250))) |>
+  st_sf(geometry = _) |>
+  st_simplify(dTolerance = 8) |>
+  st_transform(4326)
+fbus_buffer <- st_sf(r = 400L, geometry = st_union(st_buffer(fbus, 400))) |>
+  st_simplify(dTolerance = 3) |>
+  st_transform(4326)
+fbus_pts <- fbus |> transmute(name = stop_name) |> st_transform(4326)
+stopifnot(
+  "unexpected frequent stop count" = between(nrow(fbus), 100, 2000),
+  "invalid frequent bus geometry" = all(st_is_valid(fbus_line)) && all(st_is_valid(fbus_buffer)),
+  "empty frequent bus line" = !st_is_empty(fbus_line)[1],
+  "frequent stops far from the mapped line" =
+    all(as.numeric(st_distance(fbus, st_transform(fbus_line, METRIC))[, 1]) <= 250),
+  "buffer misses a stop" = all(lengths(st_intersects(fbus_pts, fbus_buffer)) > 0)
+)
+message("frequent bus stops: ", nrow(fbus))
+
 # ---- 5. output arrays --------------------------------------------------------
 mapped <- pts |> filter(!is.na(q))
 x0 <- floor(min(mapped$lon) * 100) / 100
@@ -420,9 +457,12 @@ write_geo(neighbourhoods, file.path(OUT, "neighbourhoods.geojson"))
 write_geo(lrt, file.path(OUT, "lrt.geojson"))
 write_geo(lrt_lines, file.path(OUT, "lrt-lines.geojson"))
 write_geo(lrt_buffers, file.path(OUT, "lrt-buffers.geojson"))
+write_geo(fbus_pts, file.path(OUT, "fbus-stops.geojson"))
+write_geo(fbus_line, file.path(OUT, "fbus-lines.geojson"))
+write_geo(fbus_buffer, file.path(OUT, "fbus-buffers.geojson"))
 
 sizes <- map_dfr(
-  c("permits.json", "neighbourhood-facts.json", "neighbourhoods.geojson", "lrt.geojson", "lrt-lines.geojson", "lrt-buffers.geojson"),
+  c("permits.json", "neighbourhood-facts.json", "neighbourhoods.geojson", "lrt.geojson", "lrt-lines.geojson", "lrt-buffers.geojson", "fbus-stops.geojson", "fbus-lines.geojson", "fbus-buffers.geojson"),
   \(f) {
     p <- file.path(OUT, f)
     tibble(file = f, kb = round(file.size(p) / 1024, 1), gz_kb = round(length(memCompress(readBin(p, "raw", file.size(p)), "gzip")) / 1024, 1))
