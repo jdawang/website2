@@ -170,6 +170,22 @@ Use its functions instead of writing equivalent code inline. Key exports:
 - `EDMONTON_RESIDENTIAL_BUILDING_TYPES` — character vector of residential building type strings
 - `CAPTION_COE`, `CAPTION_COE_SC`, `CAPTION_TORONTO` — standard caption strings for plots/tables
 
+## Neighbourhood infill dashboard (`projects/infill-dashboard/`)
+
+A standalone interactive page (not a blog post): MapLibre GL JS in plain HTML/JS, full-screen under the site navbar. A Map | Table switch (hash `#view=table`, usable for deep links from posts) swaps the map for a searchable, sortable, CSV-downloadable table of every neighbourhood; both views share the time, project type and occupancy controls. It is listed on the **Projects** page (`projects.qmd`, a listing like `blog.qmd`, linked from the navbar). To add another project, create `projects/<name>/index.qmd` with `date`, `description`, `categories` and an `image` in its front matter, then add its path under `listing: contents:` in `projects.qmd`. The map's card thumbnail is `projects/infill-dashboard/thumbnail.jpg` (1200x630); retake it if the map's look changes substantially. **`index.qmd` has no R chunks on purpose** because CI has no R; it renders from committed JSON. Adding an R chunk breaks CI unless `_freeze/projects/infill-dashboard/` is committed too.
+
+- `projects/infill-dashboard/_build/build_data.R` (own renv) reads the gitignored `data/` dir and the permit cache and writes `permits.json`, `neighbourhood-facts.json`, `neighbourhoods.geojson`, and the LRT files `lrt.geojson` (stops), `lrt-lines.geojson` and `lrt-buffers.geojson` (400 m / 800 m radii) into `projects/infill-dashboard/`. It also writes the frequent bus layer: `fbus-stops.geojson`, `fbus-lines.geojson` and `fbus-buffers.geojson` (400 m). Refresh each quarter:
+  ```bash
+  cd projects/infill-dashboard/_build
+  EDMONTON_BP_CACHE_PATH=~/edmonton-bp-cache Rscript build_data.R   # bump AS_OF at the top first
+  ```
+  It asserts on name matches, totals and coordinates, and fails rather than writing bad data. New neighbourhood renames go in `_build/crosswalk.csv`. Refresh the Property Information extract too, or new permits geocode worse (`PROPERTY_DIR` at the top).
+- Frequent bus: stops come from `jdawangHelpers::get_edmonton_frequent_bus_stops()` (routes 1–9, 15-minute headways, 2023-11-09 service day), the same as the Q3 building permits post. Lines are the GTFS shapes for routes 1–9 clipped to within 250 m of those stops, so the 30-minute 1A/1B branches drop out. Off by default on the map.
+- LRT lines: existing lines come from the GTFS `shapes.txt`; **under-construction alignments come from OpenStreetMap** via the Overpass API, cached in `data/osm_future_lrt.json` (the public server is often "too busy", so the script retries and then reuses the cache; `REFRESH_OSM=1` refetches). Lines are coloured with the official GTFS `route_color` (Capital `#0081BC`, Metro `#E01F27`, Valley `#008000`), as in the blog posts; each OSM way is assigned to a line by its OSM `name`, and unnamed ways take the line of the nearest named way. The script fails if any line-end future stop is more than 200 m from a mapped alignment. When a line opens, move its stops out of `data/future_lrt_stops.geojson` and refresh the GTFS.
+- Scope: RS-zoned permits only, Backyard House / Duplex to Fourplex / Fiveplex to Eightplex, from 2024-01. The three dot colours are the only categorical hues that validate CVD-safe for a map in both light and dark; don't add a fourth without re-validating.
+- **Never name an output directory `data`.** `.gitignore` has a bare `data/` that matches at any depth, and Quarto ignores `.gitignore`, so it would render locally and ship a blank map. Check with `git check-ignore -v projects/infill-dashboard/*` (expect no output).
+- Front-end fetches the JSON, so it must be listed under `resources:` in the page front matter. All page CSS is scoped to `#jd-app` / `body.infill-map-page`.
+
 ## R package management
 
 Posts have their own `renv.lock` for reproducibility. To restore packages for a specific post:

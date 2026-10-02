@@ -29,6 +29,7 @@ website:
     left:
       - about.qmd
       - blog.qmd
+      - projects.qmd
     right:
       - icon: rss
         href: blog.xml
@@ -46,4 +47,4 @@ format:
     toc: false
     respect-user-color-scheme: true
 
-editor: visual
+editor: source

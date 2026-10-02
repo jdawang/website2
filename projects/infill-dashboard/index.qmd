@@ -1,0 +1,164 @@
+---
+title: "Neighbourhood infill dashboard"
+description: "Explore every backyard home, duplex, fourplex and eightplex permitted in Edmonton's RS Zone since 2024, on a map or in a searchable neighbourhood table."
+date: "2026-09-30"
+categories: [housing, edmonton, zoning, map, dashboard]
+image: thumbnail.jpg
+image-alt: "Map of Edmonton with small-scale infill permits as coloured dots over neighbourhoods shaded by population change, with LRT lines."
+page-layout: custom
+title-block-style: none
+body-classes: infill-map-page
+toc: false
+repo-actions: false
+resources:
+  - "*.json"
+  - "*.geojson"
+---
+
+```{=html}
+<!--
+  This page has NO R code chunks on purpose: CI has no R, so it renders from the
+  committed JSON in this directory. Regenerate that data with
+  `cd projects/infill-dashboard/_build && Rscript build_data.R`. If you ever add an R chunk here,
+  you must also commit _freeze/projects/infill-dashboard/ or CI will break.
+-->
+```
+
+```{=html}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css" integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous">
+<link rel="stylesheet" href="infill-map.css">
+
+<div id="jd-app">
+  <div id="jd-map" role="region" aria-label="Map of small-scale infill permits in Edmonton"></div>
+
+  <div id="jd-error" role="alert" hidden></div>
+  <div id="jd-live" class="jd-sr" role="status" aria-live="polite"></div>
+
+  <section id="jd-controls" class="jd-card" aria-label="Map controls">
+    <div class="jd-controls-head">
+      <h1>Neighbourhood infill dashboard</h1>
+      <button type="button" id="jd-collapse" class="jd-icon-btn" aria-expanded="true" aria-controls="jd-more" aria-label="Collapse controls">
+        <span aria-hidden="true">&#x25BE;</span>
+      </button>
+    </div>
+
+    <fieldset class="jd-seg jd-view-switch">
+      <legend class="jd-sr">View</legend>
+      <label><input type="radio" name="jd-view" value="map" checked> Map</label>
+      <label><input type="radio" name="jd-view" value="table"> Table</label>
+    </fieldset>
+
+    <fieldset class="jd-time">
+      <legend class="jd-sr">Time</legend>
+      <div class="jd-time-row">
+        <button type="button" id="jd-play" class="jd-btn" aria-label="Play">&#x25B6;</button>
+        <input type="range" id="jd-slider" min="0" max="32" step="1" value="32" aria-label="Month">
+      </div>
+      <div class="jd-ticks" id="jd-ticks" aria-hidden="true" hidden></div>
+      <div class="jd-time-label"><span id="jd-month-label"></span></div>
+    </fieldset>
+
+    <div id="jd-more">
+      <div class="jd-chips" id="jd-chips" role="group" aria-label="Jump to year">
+        <button type="button" class="jd-chip" data-year="2024">2024</button>
+        <button type="button" class="jd-chip" data-year="2025">2025</button>
+        <button type="button" class="jd-chip" data-year="2026">2026</button>
+      </div>
+
+      <div class="jd-seg-row">
+        <fieldset class="jd-seg">
+          <legend>Step by</legend>
+          <label><input type="radio" name="jd-step" value="month" checked> Month</label>
+          <label><input type="radio" name="jd-step" value="year"> Year</label>
+        </fieldset>
+        <fieldset class="jd-seg">
+          <legend>Show</legend>
+          <label><input type="radio" name="jd-mode" value="cum" checked> Cumulative</label>
+          <label><input type="radio" name="jd-mode" value="only"> <span id="jd-only-label">This month only</span></label>
+        </fieldset>
+      </div>
+
+      <fieldset class="jd-types">
+        <legend>Project type</legend>
+        <div id="jd-type-list"></div>
+        <label class="jd-occ"><input type="checkbox" id="jd-occ"> Occupancy granted only</label>
+      </fieldset>
+
+      <div class="jd-legend jd-map-only">
+        <div class="jd-legend-title">Population change, 1971 to 2021</div>
+        <div id="jd-legend-ramp"></div>
+      </div>
+
+      <fieldset class="jd-transit jd-map-only">
+        <legend>Transit</legend>
+        <label><input type="checkbox" id="jd-lrt" checked> LRT line and stops</label>
+        <div class="jd-line-key" id="jd-line-key"></div>
+        <div class="jd-sub">
+          <label><input type="checkbox" class="jd-radius" value="400"> <span class="jd-line-swatch"></span> 400 m from stops</label>
+          <label><input type="checkbox" class="jd-radius" value="800"> <span class="jd-line-swatch jd-dashed"></span> 800 m from stops</label>
+        </div>
+        <label class="jd-fbus-row"><input type="checkbox" id="jd-fbus" checked> <span class="jd-line-swatch jd-bus"></span> Frequent bus (routes 1 to 9)</label>
+        <div class="jd-sub">
+          <label><input type="checkbox" id="jd-fbus-r" checked> 400 m from frequent bus stops</label>
+        </div>
+      </fieldset>
+
+      <div class="jd-row">
+        <span class="jd-spacer"></span>
+        <button type="button" id="jd-reset" class="jd-link">Reset</button>
+        <button type="button" id="jd-share" class="jd-link">Copy link</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="jd-stats" class="jd-card" aria-label="Summary for the current view">
+    <div class="jd-tiles" id="jd-tiles"></div>
+    <div class="jd-disclosure" id="jd-disclosure"></div>
+  </section>
+
+  <aside id="jd-panel" class="jd-card" aria-label="Neighbourhood details" hidden>
+    <div class="jd-panel-head">
+      <div>
+        <h2 id="jd-panel-title"></h2>
+        <div id="jd-panel-sub" class="jd-muted"></div>
+      </div>
+      <button type="button" id="jd-panel-close" class="jd-icon-btn" aria-label="Close neighbourhood details">&times;</button>
+    </div>
+    <div id="jd-panel-body"></div>
+  </aside>
+
+  <section id="jd-tableview" class="jd-card" aria-label="Neighbourhood table" hidden>
+    <div class="jd-tv-toolbar">
+      <input type="search" id="jd-search" placeholder="Search neighbourhoods" aria-label="Search neighbourhoods" autocomplete="off">
+      <select id="jd-type-filter" aria-label="Neighbourhood type"></select>
+      <span id="jd-row-count" class="jd-muted" role="status"></span>
+      <span class="jd-spacer"></span>
+      <button type="button" id="jd-csv" class="jd-link">Download CSV</button>
+    </div>
+    <div class="jd-table-wrap" id="jd-table-host"></div>
+  </section>
+
+  <dialog id="jd-about" aria-labelledby="jd-about-title">
+    <form method="dialog" class="jd-about-close"><button class="jd-icon-btn" aria-label="Close">&times;</button></form>
+    <h2 id="jd-about-title">About this dashboard</h2>
+    <p>Each dot is a building permit for <strong>small-scale infill</strong> in Edmonton's RS Zone since January 2024: a backyard house, a duplex to fourplex, or a fiveplex to eightplex. Click a dot to see how many homes it adds. Neighbourhoods are shaded by how much their population changed between 1971 and 2021.</p>
+    <h3>How to read it</h3>
+    <ul>
+      <li>Drag the slider or press play to watch permits accumulate. <em>Step by</em> chooses months or whole years, and <em>Show</em> chooses everything so far or just that month or year.</li>
+      <li>The LRT layer draws the line and stops, and can also show 400 m and 800 m distances from stops. The frequent bus layer adds ETS routes 1 to 9, which run every 15 minutes or better, with a 400 m distance from their stops.</li>
+      <li>Only fiveplexes to eightplexes show at first. Tick backyard houses and duplexes to fourplexes to add them. Every number on the page follows the filters. The shading is fixed. <em>Occupancy granted only</em> keeps just permits the City has recorded as completed.</li>
+      <li>Switch to <em>Table</em> to see every neighbourhood in a sortable list. It follows the same time, project type and occupancy controls as the map. Search by name, filter by neighbourhood type, or download what you see as a CSV.</li>
+      <li>Hover a neighbourhood to preview its stats; click to pin them. Click a dot for the permit's address.</li>
+      <li>Gold neighbourhoods have fewer people than in 1971, purple ones have more, and white ones are about the same. Grey neighbourhoods have no 1971 count. Neighbourhoods that aren't drawn have no RS-zoned lots, which includes most newer suburbs, where low-density land is zoned RSF instead.</li>
+    </ul>
+    <details>
+      <summary>Method and caveats</summary>
+      <ul id="jd-method"></ul>
+    </details>
+    <p class="jd-muted jd-licence">&copy; 2026 Jacob Dawang. <a href="http://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>. Permit and property data: <a href="https://data.edmonton.ca/">City of Edmonton Open Data</a>. Basemap: <a href="https://openfreemap.org/">OpenFreeMap</a> &copy; OpenMapTiles &copy; OpenStreetMap contributors.</p>
+  </dialog>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js" integrity="sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp" crossorigin="anonymous"></script>
+<script src="infill-map.js"></script>
+```
