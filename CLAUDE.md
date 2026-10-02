@@ -177,7 +177,7 @@ A standalone interactive page (not a blog post): MapLibre GL JS in plain HTML/JS
 - `projects/infill-dashboard/_build/build_data.R` (own renv) reads the gitignored `data/` dir and the permit cache and writes `permits.json`, `neighbourhood-facts.json`, `neighbourhoods.geojson`, and the LRT files `lrt.geojson` (stops), `lrt-lines.geojson` and `lrt-buffers.geojson` (400 m / 800 m radii) into `projects/infill-dashboard/`. It also writes the frequent bus layer: `fbus-stops.geojson`, `fbus-lines.geojson` and `fbus-buffers.geojson` (400 m). Refresh each quarter:
   ```bash
   cd projects/infill-dashboard/_build
-  EDMONTON_BP_CACHE_PATH=~/edmonton-bp-cache Rscript build_data.R   # bump AS_OF at the top first
+  EDMONTON_BP_CACHE_PATH=~/edmonton-bp-cache Rscript build_data.R   # bump AS_OF at the top first, and date-modified in index.qmd
   ```
   It asserts on name matches, totals and coordinates, and fails rather than writing bad data. New neighbourhood renames go in `_build/crosswalk.csv`. Refresh the Property Information extract too, or new permits geocode worse (`PROPERTY_DIR` at the top).
 - Frequent bus: stops come from `jdawangHelpers::get_edmonton_frequent_bus_stops()` (routes 1–9, 15-minute headways, 2023-11-09 service day), the same as the Q3 building permits post. Lines are the GTFS shapes for routes 1–9 clipped to within 250 m of those stops, so the 30-minute 1A/1B branches drop out. Off by default on the map.

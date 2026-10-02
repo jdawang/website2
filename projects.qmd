@@ -10,6 +10,7 @@ listing:
   filter-ui: true
   fields:
     - date
+    - date-modified
     - title
     - description
     - image
