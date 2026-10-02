@@ -4,6 +4,7 @@ date: "2026-10-02"
 author: "Jacob Dawang"
 categories: [housing, edmonton, zoning]
 description: "Fiveplex to eightplex rowhomes are now Edmonton's largest category of new homes, even as overall permits fell 27% through Q3 2026, mostly because of fewer large apartments. With the province eyeing the zoning bylaw, a four-unit cap would have cost up to 22% of this year's homes. Plus: a new interactive infill dashboard."
+image: rowhouse.jpg
 link-external-newwindow: true
 link-external-icon: false
 draft: false
@@ -378,14 +379,13 @@ rs_1to8_2026 <- sum(unit_breakdown$total_units_2026)
 
 Edmonton permitted `r scales::percent(abs(yoy_pct) / 100, accuracy = 1)` `r if (yoy_pct >= 0) "more" else "fewer"` homes in the first nine months of 2026 than in the same period of record-setting 2025. Most of that drop is large apartments. Meanwhile, rowhomes in the RS Zone kept growing, and fiveplex to eightplex homes are now the largest category of homes permitted in the city. It's the same story as at [mid-year](../q2-building-permits/index.qmd): fewer homes overall, but more small-scale infill than ever.
 
-That matters right now. This post comes out as Danielle Smith has indicated interest in Edmonton's zoning bylaw after lobbying from a lobbying organization led by people associated with failed municipal council candidates.
-Let's be clear: Edmonton's housing supply now relies on small-scale infill as a key piece.
-A four-unit cap on the RS Zone would have cost between `r scales::percent(cap4_pct_low_ytd, accuracy = 1)` and `r scales::percent(cap4_pct_high_ytd, accuracy = 1)` of all homes permitted in Edmonton this year.
-Any restriction on small-scale infill would significantly reduce the number of homes built, and therefore increase rents and home prices.
+That matters right now. This post comes out as Danielle Smith has indicated interest in Edmonton's zoning bylaw after lobbying from a lobbying organization led by people associated with failed municipal council candidates. Let's be clear: Edmonton's housing supply now relies on small-scale infill as a key piece. A four-unit cap on the RS Zone would have cost between `r scales::percent(cap4_pct_low_ytd, accuracy = 1)` and `r scales::percent(cap4_pct_high_ytd, accuracy = 1)` of all homes permitted in Edmonton this year. Any restriction on small-scale infill would significantly reduce the number of homes built, and therefore increase rents and home prices.
 
 With this post, I am also announcing the launch of a new [infill dashboard](/projects/infill-dashboard/). It maps every new backyard house, duplex to fourplex and fiveplex to eightplex permit in RS-zoned neighbourhoods since January 2024, with a [table view](/projects/infill-dashboard/#view=table) of every neighbourhood that you can search, sort and download. I will refresh it every quarter alongside this report.
 
 New this quarter, I zoomed out to the cumulative number of homes permitted since 2009, compared RS Zone redevelopment against the full stock of RS-zoned properties, and estimated how many homes a lower unit cap in the RS Zone would cost.
+
+![A rowhouse I biked by in Hazeldean](rowhouse.jpg){#fig-rowhouse-image fig-alt="A rowhouse in Hazeldean" width="538"}
 
 ## Key facts
 
@@ -402,7 +402,6 @@ New this quarter, I zoomed out to the cumulative number of homes permitted since
 - **`r scales::percent(pct_800m_ytd_2026, accuracy = 1)`** of homes were permitted within 800m of an existing or under-construction LRT stop in Q1–Q3 2026, compared to `r scales::percent(pct_800m_2025, accuracy = 1)` in 2025 (full year), a dip that mostly reflects the apartment slowdown. Counting frequent bus stops within 400m, it's **`r scales::percent(pct_frequent_transit_ytd_2026, accuracy = 1)`**.
 
 ::: {.callout-note collapse="true" title="Data and methods"}
-
 ```{r}
 #| label: data-load
 # bp, bp_ytd, transit_stops, frequent_bus_stops and assessment_rs are
@@ -465,7 +464,6 @@ ggplot(ytd_ratios, aes(x = year, y = ratio)) +
 ```
 
 The median Jan–Sep multiplier is `r ytd_multiplier`×, as shown in @fig-ytd-multiplier, meaning a full year typically produces `r ytd_multiplier` times the homes permitted in Jan–Sep alone. All 2026 projections in this post use this multiplier.
-
 :::
 
 ## Year-over-year Q1–Q3 comparison
@@ -718,8 +716,7 @@ ggplot(plot_nbhd, aes(x = year, y = total, fill = project_type)) +
 
 ## Cumulative homes since the RS Zone took effect
 
-What has the RS Zone changed over the long run?
-@fig-cumulative-since-2009 zooms all the way out, tracking the running total of homes permitted by neighbourhood type since 2009, with the date the RS Zone took effect marked.
+What has the RS Zone changed over the long run? @fig-cumulative-since-2009 zooms all the way out, tracking the running total of homes permitted by neighbourhood type since 2009, with the date the RS Zone took effect marked.
 
 ```{r}
 #| label: fig-cumulative-since-2009
@@ -1189,11 +1186,9 @@ unit_breakdown |>
   opt_stylize_jd()
 ```
 
-## What a lower cap would cost
+## What a lower cap would cost {#what-a-lower-cap-would-cost}
 
-The RS Zone permits up to eight units per lot today, but with the provincial government signalling its interest, one of the ways they could kneecap the RS Zone is with a unit cap.
-With no specific proposal on the table, I show a range for each cap level: the low end assumes every project over the cap still gets built, just shrunk to fit.
-The high end assumes it doesn't get built at all, because the land economics that pencil out an eight-unit rowhome don't necessarily pencil out a smaller building on the same lot. @tbl-cap-scenario applies this to every RS Zone permit for 1 to 8 units issued since January 2024, when the eight-unit ceiling actually took effect.
+The RS Zone permits up to eight units per lot today, but with the provincial government signalling its interest, one of the ways they could kneecap the RS Zone is with a unit cap. With no specific proposal on the table, I show a range for each cap level: the low end assumes every project over the cap still gets built, just shrunk to fit. The high end assumes it doesn't get built at all, because the land economics that pencil out an eight-unit rowhome don't necessarily pencil out a smaller building on the same lot. @tbl-cap-scenario applies this to every RS Zone permit for 1 to 8 units issued since January 2024, when the eight-unit ceiling actually took effect.
 
 ```{r}
 #| label: cap-scenario-setup
@@ -1287,8 +1282,7 @@ cap_scenario_table |>
 
 Even a cap of four units is not a small concession. Since January 2024, a four-unit cap would have cost Edmonton somewhere between `r scales::comma(cap4_low_zbr)` and `r scales::comma(cap4_high_zbr)` homes — `r scales::percent(cap4_pct_low_zbr, accuracy=1)` to `r scales::percent(cap4_pct_high_zbr, accuracy=1)` of everything the city has permitted in that span. A two-unit cap, effectively a return to the duplex-era rules the RS Zone replaced, would have cost `r scales::comma(cap2_low_zbr)` to `r scales::comma(cap2_high_zbr)` homes.
 
-Because 2024 was a ramp-up year for small-scale infill, if we take the Q1–Q3 2026 numbers to be the steady state, the situation looks much worse. A four-unit cap would cost up to `r scales::percent(cap4_pct_high_ytd, accuracy=1)` of Edmonton's housing permitted and a two-unit cap, `r scales::percent(cap2_pct_high_ytd, accuracy=1)`.
-That won't just raise rent, but also lead to losses in good construction jobs as homes are not built.
+Because 2024 was a ramp-up year for small-scale infill, if we take the Q1–Q3 2026 numbers to be the steady state, the situation looks much worse. A four-unit cap would cost up to `r scales::percent(cap4_pct_high_ytd, accuracy=1)` of Edmonton's housing permitted and a two-unit cap, `r scales::percent(cap2_pct_high_ytd, accuracy=1)`. That won't just raise rent, but also lead to losses in good construction jobs as homes are not built.
 
 ```{r}
 #| label: fig-cap-cumulative
@@ -1357,8 +1351,7 @@ ggplot() +
 
 2025 set a record for the proportion of homes permitted within 800m of transit. At mid-year, 2026 was running in line with last year, but with the third quarter in, it has slipped. @fig-ecdf-transit compares the cumulative distribution of homes by distance from the nearest LRT stop, across years. Within 800m of transit, the cumulative share of homes is `r scales::percent(pct_800m_ytd_2026, accuracy=1)` in Q1–Q3 2026, compared to `r scales::percent(pct_800m_2025, accuracy=1)` in 2025 (full year). Part of this is likely the apartment slowdown again, since large apartment projects tend to cluster around stations.
 
-Nevertheless, the Zoning Bylaw Renewal is still doing heavy work, as 2026 is still shaping up to be a great year for transit-oriented housing.
-Like 2025, the entire distribution has shifted to indicate more homes, closer to transit.
+Nevertheless, the Zoning Bylaw Renewal is still doing heavy work, as 2026 is still shaping up to be a great year for transit-oriented housing. Like 2025, the entire distribution has shifted to indicate more homes, closer to transit.
 
 ```{r}
 #| label: fig-ecdf-transit

@@ -47,4 +47,4 @@ format:
     toc: false
     respect-user-color-scheme: true
 
-editor: visual
+editor: source
