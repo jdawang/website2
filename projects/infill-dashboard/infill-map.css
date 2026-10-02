@@ -612,27 +612,66 @@ body.quarto-dark .jd-popup .jd-muted {
     top: 8px;
     max-width: none;
     width: auto;
-    overflow-x: auto;
     padding: 0.4rem 0.6rem;
   }
   .jd-tiles {
-    flex-wrap: nowrap;
-    gap: 1rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.35rem 0.9rem;
   }
   .jd-tile {
-    flex: none;
+    min-width: 0;
   }
   .jd-tile-v {
     font-size: 1.1rem;
+  }
+  .jd-tile-l {
+    line-height: 1.2;
+  }
+  /* Collapsed sheet: view switch + toggle on one row, then the time slider. */
+  #jd-controls.collapsed {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "view btn" "time time";
+    align-items: center;
+    padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  #jd-controls.collapsed .jd-controls-head {
+    display: contents;
+  }
+  #jd-controls.collapsed h1 {
+    display: none;
+  }
+  #jd-controls.collapsed #jd-collapse {
+    grid-area: btn;
+  }
+  #jd-controls.collapsed .jd-view-switch {
+    grid-area: view;
+    margin: 0;
+  }
+  #jd-controls.collapsed .jd-time {
+    grid-area: time;
+    margin: 0;
+  }
+  #jd-controls.collapsed .jd-btn {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+  #jd-controls.collapsed .jd-time-label {
+    margin-left: calc(2.25rem + 0.6rem);
+    font-size: 0.85rem;
+  }
+  #jd-controls.collapsed .jd-time-row input[type="range"] {
+    height: 1.75rem;
   }
   .jd-disclosure {
     display: none;
   }
   #jd-tableview {
-    top: 64px;
+    top: 116px;
     left: 8px;
     right: 8px;
-    bottom: 150px;
+    bottom: 128px;
   }
   .jd-tv-toolbar input[type="search"] {
     width: 100%;

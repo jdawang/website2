@@ -2,6 +2,7 @@
 title: "Neighbourhood infill dashboard"
 description: "Explore every backyard home, duplex, fourplex and eightplex permitted in Edmonton's RS Zone since 2024, on a map or in a searchable neighbourhood table."
 date: "2026-09-30"
+date-modified: "2026-10-02"
 categories: [housing, edmonton, zoning, map, dashboard]
 image: thumbnail.jpg
 image-alt: "Map of Edmonton with small-scale infill permits as coloured dots over neighbourhoods shaded by population change, with LRT lines."
