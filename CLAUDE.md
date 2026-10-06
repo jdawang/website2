@@ -20,7 +20,7 @@ Always render a single post from within the post's directory. This allows for th
 ```bash
 # Render a single post (from post directory)
 cd blog/2026/nodes-corridors
-quarto render blog/2026/nodes-corridors/index.qmd
+quarto render index.qmd
 ```
 
 Deployment is automatic via GitHub Actions on push to `main`: renders with Quarto and deploys to Cloudflare Pages. Deployment to a preview url is automatic via GitHub actions on pushes to open pull requests.
@@ -90,13 +90,11 @@ For a complete example of post structure, see `blog/2026/zbr-two-year-review/`.
 
 ## jdawangHelpers package
 
-`jdawangHelpers` is a companion R package providing shared utilities for blog posts. Source is at GitHub: `jdawang/jdawangHelpers`. It covers:
+`jdawangHelpers` ([github.com/jdawang/jdawangHelpers](https://github.com/jdawang/jdawangHelpers)) is a companion R package providing shared utilities for blog posts. Always install it from GitHub, never from a local path:
 
-- **Edmonton building permit processing** — `clean_edmonton_bp_columns()`, `filter_edmonton_residential()`, `add_edmonton_project_type()`, `add_edmonton_suite_info()`, `add_edmonton_neighbourhood_type()`
-- **Transit distance calculations** — `add_transit_distance()`, `add_ecdf_by_distance()`
-- **ggplot2 themes** — `theme_jd()` (dark base theme, magma palette), `theme_map()`, `theme_map_dark()`. `theme_jd()` bakes in the viridis magma palette as the default discrete fill/colour scale — to use it, map a variable to `fill` or `colour` in `aes()`. Do not use `scale_fill_manual` with hardcoded colours unless intentionally overriding the palette.
-- **Map layers** — `layers_map_base()` (requires `mountainmathHelpers`), `layers_transit_ecdf()`
-- **GT table helpers**
+```r
+renv::install_github("jdawang/jdawangHelpers")
+```
 
 Typical pipeline in posts:
 
@@ -112,12 +110,6 @@ bp |>
 
 **Always use jdawangHelpers functions** for building permit processing, transit calculations, themes, and map layers. Do not copy code patterns from posts that predate jdawangHelpers — those implement manually what the package now handles. When in doubt, check the package source before writing new data processing code. Use `blog/2026/mli-select-edmonton/` as the canonical reference for jdawangHelpers usage. Use `blog/2026/zbr-two-year-review/` as the reference for writing style and tone.
 
-Install from GitHub before using in a post:
-
-```r
-renv::install_github("jdawang/jdawangHelpers")
-```
-
 In the first R chunk, along with imports, always load the following options like the following. These set important API keys and cache paths for the cancensus and jdawangHelpers packages:
 
 ```r
@@ -129,18 +121,10 @@ options(
 )
 ```
 
-## jdawangHelpers package
-
-The `jdawangHelpers` package ([github.com/jdawang/jdawangHelpers](https://github.com/jdawang/jdawangHelpers)) contains reusable helpers for this blog. Always install it from GitHub, never from a local path:
-
-```r
-remotes::install_github("jdawang/jdawangHelpers")
-```
-
-Use its functions instead of writing equivalent code inline. Key exports:
+### Key exports
 
 **Themes**
-- `theme_jd(mode)` — ggplot2 theme with dark/light mode, viridis magma palette, Source Sans Pro font
+- `theme_jd(mode)` — ggplot2 theme with dark/light mode, viridis magma palette, Source Sans Pro font. It bakes in magma as the default discrete fill/colour scale — map a variable to `fill` or `colour` in `aes()`, and don't use `scale_fill_manual` with hardcoded colours unless intentionally overriding the palette.
 - `theme_map(mode)` — map-specific theme (no axes/grids, transparent panel)
 
 **Plot layers**
