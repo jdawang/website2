@@ -221,6 +221,20 @@ git add .sequoia-state.json && git commit     # see below
   It must **not** live under `files/`, which Quarto renders to `_site/files/`.
 - Bluesky cross-posting is off (no `bluesky` key in `sequoia.json`). Leave it off unless
   you want every republished post announced.
+- **The publication record's `basicTheme` is set by hand**, not by sequoia — 0.5.7 has no
+  theme support at all (no key in `sequoia.schema.json`, nothing in the installed bundle).
+  `_sequoia/set_publication_theme.py` makes the one `com.atproto.repo.putRecord` call this
+  needs, reusing sequoia's own OAuth session (`~/.config/sequoia/oauth.json`, read-only) via
+  a hand-rolled DPoP proof. The four colours mirror `custom_styles.scss`'s light mode
+  (`$navbar-bg` as the accent); update the script and re-run if those change.
+  - **Essentially one-shot.** Only `sequoia update` (never `publish`/`sync`/`inject`) writes
+    the publication record, so the normal publish loop above never touches this.
+  - **`sequoia update` → "ATProto publication record" silently drops `basicTheme`** — its
+    `updatePublication` rebuilds the record from a fixed whitelist instead of spreading the
+    existing one. Re-run `set_publication_theme.py` after using that flow.
+  - `--check` is read-only and needs no credentials (resolves the PDS from the DID document
+    and does a public `getRecord`), so it's the cheap way to confirm the live record matches:
+    `uv run --script _sequoia/set_publication_theme.py --check`.
 
 ## R package management
 
