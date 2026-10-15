@@ -28,6 +28,19 @@ jobs:
       - name: Render website
         uses: quarto-dev/quarto-actions/render@v2
 
+      - name: Install sequoia
+        run: npm i -g sequoia-cli@0.5.7
+
+      # Preview deploys are public, so they must not claim to be the canonical home of
+      # a document record. Dry run keeps the step exercised on every PR all the same.
+      - name: Check standard.site link tags
+        if: github.ref != 'refs/heads/main'
+        run: sequoia inject --output _site --dry-run
+
+      - name: Inject standard.site link tags
+        if: github.ref == 'refs/heads/main'
+        run: sequoia inject --output _site
+
       - name: Publish to cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
