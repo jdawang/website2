@@ -15,7 +15,7 @@ execute:
 website:
   title: "Jacob Dawang"
   image: files/profile.png
-  site-url: "https://www.jacobdawang.com"
+  site-url: "https://jacobdawang.com"
   repo-url: "https://github.com/jdawang/website2"
   repo-actions: source
   repo-branch: main
