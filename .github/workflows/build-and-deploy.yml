@@ -48,3 +48,13 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy _site --project-name=jacobdawang
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      # Runs last on purpose: publishing is manual and local, so this only reports
+      # whether it was done, and a stale publish state must not cost you the preview
+      # deploy you were about to review. Needs no credentials - it just re-hashes the
+      # generated documents and compares against the committed .sequoia-state.json.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+
+      - name: Verify standard.site publish is up to date
+        run: uv run --script _sequoia/build_documents.py --verify

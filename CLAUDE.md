@@ -201,6 +201,13 @@ git add .sequoia-state.json && git commit     # see below
   points at the apex domain. PRs run `sequoia inject --dry-run` instead, keeping the step
   exercised without making that claim. A post added in a PR but not yet published shows
   up there under "Skipped (no match)" — that is the reminder to publish it.
+- **CI verifies that you remembered to publish.** The last step of every build runs
+  `build_documents.py --verify`, which re-hashes the generated documents and compares
+  them against the committed state, the same way sequoia decides create/update/skip —
+  so it needs no credentials. It fails the build if a post was never published, was
+  edited since publishing, or was renamed and left a stale entry behind. It runs after
+  the Cloudflare deploy so a stale publish state never costs you the preview. Practical
+  consequence: **publish from the PR branch before merging**, not after.
 - **The adapter must carry `atUri` forward.** Sequoia decides create-vs-update from the
   content file's own front matter and writes the URI back there after creating a record.
   Since the sidecars are regenerated each run, the script re-reads those URIs out of

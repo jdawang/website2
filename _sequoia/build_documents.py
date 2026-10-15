@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import html
 import json
 import re
@@ -186,12 +187,64 @@ def load_at_uris() -> dict[str, str]:
     }
 
 
+def verify_publish_state(generated: dict[str, Path]) -> int:
+    """Check the freshly generated documents against the committed publish state.
+
+    This mirrors sequoia's own create/update/skip decision without needing
+    credentials: it hashes each file exactly the way `getContentHash` does (plain
+    SHA-256 over the raw bytes) and compares against `.sequoia-state.json`. Anything
+    that does not line up means `sequoia publish` has not been run for this content,
+    and the deploy would ship a post with no document link tag.
+    """
+    if not STATE.exists():
+        print(f"error: {STATE.name} is missing - run `sequoia publish`", file=sys.stderr)
+        return 1
+
+    state = json.loads(STATE.read_text()).get("posts", {})
+    unpublished, changed = [], []
+    for rel, path in sorted(generated.items()):
+        entry = state.get(rel)
+        if entry is None:
+            unpublished.append(rel)
+        elif hashlib.sha256(path.read_bytes()).hexdigest() != entry.get("contentHash"):
+            changed.append(rel)
+    stale = sorted(set(state) - set(generated))
+
+    for rel in unpublished:
+        print(f"never published:            {rel}", file=sys.stderr)
+    for rel in changed:
+        print(f"changed since publish:      {rel}", file=sys.stderr)
+    for rel in stale:
+        print(f"stale entry (post renamed): {rel}", file=sys.stderr)
+
+    problems = len(unpublished) + len(changed) + len(stale)
+    if problems:
+        print(
+            f"\n{problems} document(s) out of sync with the published records.\n"
+            "Run, then commit .sequoia-state.json:\n"
+            "    quarto render\n"
+            "    uv run --script _sequoia/build_documents.py\n"
+            "    sequoia publish",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"publish state is up to date ({len(generated)} documents)")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--check",
         action="store_true",
         help="report what would be written, without writing anything",
+    )
+    mode.add_argument(
+        "--verify",
+        action="store_true",
+        help="write, then fail if any document is unpublished or changed since publish",
     )
     args = parser.parse_args()
 
@@ -199,6 +252,7 @@ def main() -> None:
     at_uris = load_at_uris()
     warnings: list[str] = []
     rows: list[tuple[str, int, str]] = []
+    generated: dict[str, Path] = {}
 
     if not args.check and CONTENT.exists():
         shutil.rmtree(CONTENT)
@@ -243,7 +297,10 @@ def main() -> None:
 
         if not args.check:
             out_dir.mkdir(parents=True, exist_ok=True)
-            (out_dir / "index.md").write_text(render_document(meta, body), encoding="utf-8")
+            document = out_dir / "index.md"
+            document.write_text(render_document(meta, body), encoding="utf-8")
+            # Key it the way sequoia keys its state: relative to the config directory.
+            generated[str(document.relative_to(ROOT))] = document
 
         rows.append((slug, len(body), cover_note))
 
@@ -256,6 +313,9 @@ def main() -> None:
     verb = "would write" if args.check else "wrote"
     print(f"\n{verb} {len(rows)} documents to {CONTENT.relative_to(ROOT)}"
           f" ({len(at_uris)} already published)")
+
+    if args.verify:
+        sys.exit(verify_publish_state(generated))
 
 
 if __name__ == "__main__":
