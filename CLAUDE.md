@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Jacob Dawang's personal website and blog at [jacobdawang.com](https://www.jacobdawang.com), built with [Quarto](https://quarto.org/). Blog posts are data analysis pieces focused on Edmonton housing, zoning, and transit, written in R using Quarto documents (`.qmd`).
+Jacob Dawang's personal website and blog at [jacobdawang.com](https://jacobdawang.com), built with [Quarto](https://quarto.org/). Blog posts are data analysis pieces focused on Edmonton housing, zoning, and transit, written in R using Quarto documents (`.qmd`).
 
 ## Build commands
 
@@ -198,7 +198,7 @@ git add .sequoia-state.json && git commit     # see below
   `_site` with no credentials. Re-commit it after every publish.
 - **CI only injects for real on `main`.** Preview deploys are public, and a preview URL
   carrying the tag would claim to be the canonical home of a record whose `canonicalUrl`
-  points at www. PRs run `sequoia inject --dry-run` instead, which keeps the step
+  points at the apex domain. PRs run `sequoia inject --dry-run` instead, keeping the step
   exercised without making that claim. A post added in a PR but not yet published shows
   up there under "Skipped (no match)" — that is the reminder to publish it.
 - **The adapter must carry `atUri` forward.** Sequoia decides create-vs-update from the

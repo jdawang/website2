@@ -1,6 +1,6 @@
 {
   "$schema": "https://tangled.org/stevedylan.dev/sequoia/raw/main/sequoia.schema.json",
-  "siteUrl": "https://www.jacobdawang.com",
+  "siteUrl": "https://jacobdawang.com",
   "contentDir": "./_sequoia/content",
   "publicDir": ".",
   "outputDir": "./_site",
