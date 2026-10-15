@@ -170,6 +170,51 @@ A standalone interactive page (not a blog post): MapLibre GL JS in plain HTML/JS
 - **Never name an output directory `data`.** `.gitignore` has a bare `data/` that matches at any depth, and Quarto ignores `.gitignore`, so it would render locally and ship a blank map. Check with `git check-ignore -v projects/infill-dashboard/*` (expect no output).
 - Front-end fetches the JSON, so it must be listed under `resources:` in the page front matter. All page CSS is scoped to `#jd-app` / `body.infill-map-page`.
 
+## standard.site publishing (AT Protocol)
+
+Posts are mirrored to the ATmosphere as `site.standard.document` records with the
+[sequoia](https://sequoia.pub) CLI, so they show up in standard.site readers and indexers.
+
+Sequoia only scans `**/*.md` and builds the record's `textContent` from the raw file body,
+which would miss every computed figure, table and inline R value in a `.qmd`. So it never
+reads `blog/` directly. Instead `_sequoia/build_documents.py` generates one plain markdown
+document per post into `_sequoia/content/` (gitignored), taking metadata from the Quarto
+source front matter and the body as plaintext from the rendered HTML in `_site`. That
+generated tree is what `contentDir` in `sequoia.json` points at.
+
+Publish manually after rendering — it needs PDS credentials, so CI never does it:
+
+```bash
+quarto render
+uv run --script _sequoia/build_documents.py   # --check to preview without writing
+sequoia publish --dry-run
+sequoia publish
+git add .sequoia-state.json && git commit     # see below
+```
+
+- **`.sequoia-state.json` is committed on purpose.** `sequoia inject` builds its
+  slug-to-AT-URI map solely from that file and never hits the network, so committing it is
+  what lets the GitHub Action inject `<link rel="site.standard.document">` tags into
+  `_site` with no credentials. Re-commit it after every publish.
+- **CI only injects for real on `main`.** Preview deploys are public, and a preview URL
+  carrying the tag would claim to be the canonical home of a record whose `canonicalUrl`
+  points at www. PRs run `sequoia inject --dry-run` instead, which keeps the step
+  exercised without making that claim. A post added in a PR but not yet published shows
+  up there under "Skipped (no match)" — that is the reminder to publish it.
+- **The adapter must carry `atUri` forward.** Sequoia decides create-vs-update from the
+  content file's own front matter and writes the URI back there after creating a record.
+  Since the sidecars are regenerated each run, the script re-reads those URIs out of
+  `.sequoia-state.json` and re-emits them byte-identically (last key, quoted) so the
+  content hash still matches. Break that and every publish creates duplicate records —
+  check with `sequoia publish --dry-run`, which should say "All posts are up to date".
+- **Cover images are downscaled to under 900 KB** because sequoia hard-fails any cover
+  at or over 1 MB. Posts whose `image:` is a remote URL just publish without one.
+- Publication verification is `/.well-known/site.standard.publication`, served from the
+  top-level `.well-known/` directory listed under `project: resources:` in `_quarto.yml`.
+  It must **not** live under `files/`, which Quarto renders to `_site/files/`.
+- Bluesky cross-posting is off (no `bluesky` key in `sequoia.json`). Leave it off unless
+  you want every republished post announced.
+
 ## R package management
 
 Posts have their own `renv.lock` for reproducibility. To restore packages for a specific post:

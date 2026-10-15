@@ -1,0 +1,194 @@
+{
+  "posts": {
+    "_sequoia/content/blog/2026/q3-building-permits/index.md": {
+      "contentHash": "6768bd0fb86fe9624c4f1997676344f6fbe9ca612351790f015482c29f364f06",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3yu5xcn2i",
+      "lastPublished": "2026-10-15T12:50:22.604Z",
+      "slug": "blog/2026/q3-building-permits"
+    },
+    "_sequoia/content/blog/2026/property-tax-uplift/index.md": {
+      "contentHash": "2b7140428fa30684d4e3690de36812f64cd08249bb5f9e250d559d6aa3c31488",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3yuxy4325",
+      "lastPublished": "2026-10-15T12:50:23.287Z",
+      "slug": "blog/2026/property-tax-uplift"
+    },
+    "_sequoia/content/blog/2026/q2-building-permits/index.md": {
+      "contentHash": "1791b24b1c6251b08b91864b4ac5fd718d2e7fb0e6ed62464119568a4ba818bb",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3yvmosx25",
+      "lastPublished": "2026-10-15T12:50:24.044Z",
+      "slug": "blog/2026/q2-building-permits"
+    },
+    "_sequoia/content/blog/2026/alberta-daylight-time/index.md": {
+      "contentHash": "af3aafea2f92d145971d03e9dccfd408d6c0abc6a4a078ddcfc4691a89d56041",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3ywc3pf2m",
+      "lastPublished": "2026-10-15T12:50:24.705Z",
+      "slug": "blog/2026/alberta-daylight-time"
+    },
+    "_sequoia/content/blog/2026/mli-select-edmonton/index.md": {
+      "contentHash": "b09014a5d9c627b4f6995e5ddf71fd198da59050c2fe97521145388a23ed60b4",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3ywv7vm2u",
+      "lastPublished": "2026-10-15T12:50:25.329Z",
+      "slug": "blog/2026/mli-select-edmonton"
+    },
+    "_sequoia/content/blog/2026/q1-building-permits/index.md": {
+      "contentHash": "3a2ec9b35b06734364fc732cab8a3e9da1359a31d275e388ecf0df804b0de228",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3yxswb325",
+      "lastPublished": "2026-10-15T12:50:26.374Z",
+      "slug": "blog/2026/q1-building-permits"
+    },
+    "_sequoia/content/blog/2026/nodes-corridors/index.md": {
+      "contentHash": "8029ff1c4f552334c79adbfc3ac18d2235b3eec14fa0788461f91d427abd059b",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3yymiap25",
+      "lastPublished": "2026-10-15T12:50:27.072Z",
+      "slug": "blog/2026/nodes-corridors"
+    },
+    "_sequoia/content/blog/2026/lot-size/index.md": {
+      "contentHash": "21190156aa150efcb445764698d1ea8a2b7bb55aef392606c8b772b425f24868",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3yzep5y2d",
+      "lastPublished": "2026-10-15T12:50:27.892Z",
+      "slug": "blog/2026/lot-size"
+    },
+    "_sequoia/content/blog/2026/zbr-two-year-review/index.md": {
+      "contentHash": "fa66fa023e42d240f90c6c2a1bcdf1c37a13fd95a58b0fb949bb672ba9591231",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z23g7725",
+      "lastPublished": "2026-10-15T12:50:28.690Z",
+      "slug": "blog/2026/zbr-two-year-review"
+    },
+    "_sequoia/content/blog/2025/property-value-preliminary/index.md": {
+      "contentHash": "5bd4cae07b5a2a59aad425894dfd31d691ba7fe6bd20c1bbd9fab23a8754218e",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z2rsji2d",
+      "lastPublished": "2026-10-15T12:50:29.360Z",
+      "slug": "blog/2025/property-value-preliminary"
+    },
+    "_sequoia/content/blog/2025/ward-profiles/index.md": {
+      "contentHash": "d09679a7eccae1b58f16cb8871ddba70fd53ae152843ee2a519343794334a887",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z3jsxa25",
+      "lastPublished": "2026-10-15T12:50:30.094Z",
+      "slug": "blog/2025/ward-profiles"
+    },
+    "_sequoia/content/blog/2025/transit-rowhouses/index.md": {
+      "contentHash": "27d92db8b2beabdd5b4c4a20622b653d17acab479755c0c9c344f3eb2c6f006e",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z43vua2a",
+      "lastPublished": "2026-10-15T12:50:30.793Z",
+      "slug": "blog/2025/transit-rowhouses"
+    },
+    "_sequoia/content/blog/2025/population-growth-rowhouses/index.md": {
+      "contentHash": "258833b9b3f57ea4d8ba67b7c1d7af34b66b3ae8ad18ddcf9fb0cc2f3bd6a353",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z4uwo42u",
+      "lastPublished": "2026-10-15T12:50:31.698Z",
+      "slug": "blog/2025/population-growth-rowhouses"
+    },
+    "_sequoia/content/blog/2025/real-rs-story/index.md": {
+      "contentHash": "f1b1ca368dd069f960bb8d872de4a4821e5272a0533c592a9079b4a6b235431d",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z5sf2q2z",
+      "lastPublished": "2026-10-15T12:50:32.549Z",
+      "slug": "blog/2025/real-rs-story"
+    },
+    "_sequoia/content/blog/2025/edmonton-bp-2024/index.md": {
+      "contentHash": "0ff18fe249188d843c6bc9f96c605fe6e1115a311c4814ad6b0dff38863cc376",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z6f3h72m",
+      "lastPublished": "2026-10-15T12:50:33.125Z",
+      "slug": "blog/2025/edmonton-bp-2024"
+    },
+    "_sequoia/content/blog/2025/lv-smarttrack/index.md": {
+      "contentHash": "e56fa9e40afbcc82b6c994838be89ac1af1092289a873bda8c3249726ba29d0f",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z6zeuo22",
+      "lastPublished": "2026-10-15T12:50:33.765Z",
+      "slug": "blog/2025/lv-smarttrack"
+    },
+    "_sequoia/content/blog/2024/garneau-rezoning-oped/index.md": {
+      "contentHash": "0dad1db893ed10adcff5b7dbe622ee56b2b4926985514a212756d973320f1edf",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3z7l6fq2a",
+      "lastPublished": "2026-10-15T12:50:34.475Z",
+      "slug": "blog/2024/garneau-rezoning-oped"
+    },
+    "_sequoia/content/blog/2024/district-planning-opinion/index.md": {
+      "contentHash": "3cbbde3522124a4edb83a9c2255e4513ee79d02e1f62a20e8c730fb0622b3a31",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zakhpa2d",
+      "lastPublished": "2026-10-15T12:50:35.409Z",
+      "slug": "blog/2024/district-planning-opinion"
+    },
+    "_sequoia/content/blog/2024/all-lrt-stops-updated/index.md": {
+      "contentHash": "ccd6f5de5cd0159100ff04dcf67d26cfdb82245e96b84658ac44cd9f5f4dc161",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zb3xq622",
+      "lastPublished": "2026-10-15T12:50:36.061Z",
+      "slug": "blog/2024/all-lrt-stops-updated"
+    },
+    "_sequoia/content/blog/2024/transit-usage-peds/index.md": {
+      "contentHash": "c1d5be0fe2badcb3d16a19284e6046c4aafe24f628c9f43b86e10b40875ce4fd",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zbpspq2w",
+      "lastPublished": "2026-10-15T12:50:36.640Z",
+      "slug": "blog/2024/transit-usage-peds"
+    },
+    "_sequoia/content/blog/2024/all-lrt-stops/index.md": {
+      "contentHash": "0940a0de9d14bbc0b383d59e5b4fda7bf19568aeaecc3481e2093d8423564b0e",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zcbwsq2z",
+      "lastPublished": "2026-10-15T12:50:36.910Z",
+      "slug": "blog/2024/all-lrt-stops"
+    },
+    "_sequoia/content/blog/2023/avonmore-stop/index.md": {
+      "contentHash": "ad6d87e95a12bd8408df4f4d094e374a824582430d58e0caeaa7a75a4bef4148",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zclj7h2m",
+      "lastPublished": "2026-10-15T12:50:37.525Z",
+      "slug": "blog/2023/avonmore-stop"
+    },
+    "_sequoia/content/blog/2023/mckernan-belgravia-station/index.md": {
+      "contentHash": "5c5b7768f472e1cbca06a394b058696702e6ced567f12a01c2ebb56743903778",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zd6fwy2z",
+      "lastPublished": "2026-10-15T12:50:38.280Z",
+      "slug": "blog/2023/mckernan-belgravia-station"
+    },
+    "_sequoia/content/blog/2023/bc-tod-toronto/index.md": {
+      "contentHash": "1d2b712982defb1ebbaa026690951b027ce3f0b4d097e5b7b39a7f0d5f1e51c5",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zdtz472m",
+      "lastPublished": "2026-10-15T12:50:38.830Z",
+      "slug": "blog/2023/bc-tod-toronto"
+    },
+    "_sequoia/content/blog/2023/migrating-to-quarto/index.md": {
+      "contentHash": "d82c30b8c38a14e5eeb9d2d43668b30be0fd1ae56891e4993b8a3d7de8d5b2bb",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3ze62qw2m",
+      "lastPublished": "2026-10-15T12:50:38.884Z",
+      "slug": "blog/2023/migrating-to-quarto"
+    },
+    "_sequoia/content/blog/2023/lvt-deputation/index.md": {
+      "contentHash": "bff2f2c6b1d2a2236a8d085b09e83d122c6fa7913289a4638a4b066cc16eb406",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zeern325",
+      "lastPublished": "2026-10-15T12:50:39.478Z",
+      "slug": "blog/2023/lvt-deputation"
+    },
+    "_sequoia/content/blog/2023/edmonton-mature-neighbourhoods/index.md": {
+      "contentHash": "2867b9edbb2c74332ab345115cd18fa3e44f1508b5f2103d837c50a9f7eb6067",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zey77y2u",
+      "lastPublished": "2026-10-15T12:50:40.000Z",
+      "slug": "blog/2023/edmonton-mature-neighbourhoods"
+    },
+    "_sequoia/content/blog/2022/election-maps-2022/index.md": {
+      "contentHash": "019bec980b2a3062d7693858032f6e11f6d8b084f813fc449ac6962b677806a7",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zfhvry2d",
+      "lastPublished": "2026-10-15T12:50:40.590Z",
+      "slug": "blog/2022/election-maps-2022"
+    },
+    "_sequoia/content/blog/2022/mapping-heritage/index.md": {
+      "contentHash": "dfa0494c96c34bc8ed48d6b47a5dc39b44c926d108c77c6a8c1617872cc5d9db",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zg5p552i",
+      "lastPublished": "2026-10-15T12:50:41.321Z",
+      "slug": "blog/2022/mapping-heritage"
+    },
+    "_sequoia/content/blog/2022/tdsb-accessibility/index.md": {
+      "contentHash": "b64a026c2f3e41e0b2a11eb4ba8a5f956a8b45341b764647ed4460ecda11ddf1",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zgrika2w",
+      "lastPublished": "2026-10-15T12:50:41.872Z",
+      "slug": "blog/2022/tdsb-accessibility"
+    },
+    "_sequoia/content/blog/2022/mapping-tdsb/index.md": {
+      "contentHash": "9011777902b7b6a16df849ce97fac53aa0e32ef01986cb7e94c5fc6fd9ef9501",
+      "atUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.document/3mxw3zhhjs325",
+      "lastPublished": "2026-10-15T12:50:42.645Z",
+      "slug": "blog/2022/mapping-tdsb"
+    }
+  },
+  "publication": {
+    "cid": "bafyreidmun56yqng6eyk3enim7oi7kaqb7rhwmug2q4ws7tojl6473c3di",
+    "uri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.publication/3mxvzn7rkpp2i"
+  }
+}

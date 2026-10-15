@@ -1,0 +1,16 @@
+{
+  "$schema": "https://tangled.org/stevedylan.dev/sequoia/raw/main/sequoia.schema.json",
+  "siteUrl": "https://www.jacobdawang.com",
+  "contentDir": "./_sequoia/content",
+  "publicDir": ".",
+  "outputDir": "./_site",
+  "pathTemplate": "/{slug}/",
+  "removeIndexFromSlug": true,
+  "publicationUri": "at://did:plc:fyuwnqbsptbhffcmqv4ugl5b/site.standard.publication/3mxvzn7rkpp2i",
+  "frontmatter": {
+    "publishDate": "date",
+    "coverImage": "image",
+    "tags": "categories"
+  },
+  "publishContent": true
+}
