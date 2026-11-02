@@ -1,6 +1,6 @@
 # Build the static data files for the infill map page (../index.qmd).
 #
-# Run manually each quarter, from this directory:
+# Run manually whenever you want newer permits (see the refresh-infill-dashboard skill), from this directory:
 #   cd projects/infill-dashboard/_build && Rscript build_data.R
 #
 # Reads the gitignored shared data/ dir and the permit cache, and writes small
@@ -15,13 +15,13 @@ suppressMessages({
 })
 
 # ---- config ------------------------------------------------------------------
-AS_OF <- as.Date("2026-09-30")
+AS_OF <- as.Date("2026-10-24")
 START_YEAR <- 2024
-N_MONTHS <- (year(AS_OF) - START_YEAR) * 12 + month(AS_OF) # 33
+N_MONTHS <- (year(AS_OF) - START_YEAR) * 12 + month(AS_OF) # 34
 TYPES <- c("Backyard House", "Duplex to Fourplex", "Fiveplex to Eightplex")
 DATA <- "../../../data"
 OUT <- ".."
-PROPERTY_DIR <- file.path(DATA, "Property Information (Current Calendar Year)_20260113")
+PROPERTY_CACHE <- Sys.getenv("EDMONTON_BP_CACHE_PATH")
 METRIC <- 3776 # NAD83(CSRS) / UTM zone 12N, for buffers and simplification in metres
 EDMONTON_BBOX <- c(xmin = -113.72, xmax = -113.28, ymin = 53.33, ymax = 53.72)
 
@@ -83,20 +83,60 @@ message("permits in scope: ", nrow(permits), "; units: ", sum(permits$units_adde
 stopifnot(!anyNA(permits$neighbourhood), all(permits$m %in% 0:(N_MONTHS - 1)))
 
 # ---- 2. property roll: RS lots, year built, and coordinates for pass B --------
-lyr <- st_layers(PROPERTY_DIR)$name[1]
-roll <- read_sf(
-  PROPERTY_DIR,
-  query = sprintf(
-    "SELECT house_numb, street_nam, zoning, neighbou_2, year_built, latitude, longitude FROM \"%s\" WHERE zoning = 'RS'",
-    lyr
-  )
-) |>
-  st_drop_geometry() |>
-  filter(!is.na(house_numb)) |>
+# City of Edmonton "Property Information (Current Calendar Year)", Socrata id
+# dkk9-cj3x, fetched through the SODA3 API (same credentials as the permits) and
+# cached by fetch date next to the permit cache. The newest cached file is reused;
+# set PROPERTY_REFRESH=1 to fetch again.
+get_property_roll <- function(cache_dir, refresh = Sys.getenv("PROPERTY_REFRESH") == "1") {
+  cached <- sort(list.files(cache_dir, "^edmonton_property_information_rs_.*\\.rds$", full.names = TRUE))
+  if (!refresh && length(cached) > 0) {
+    return(list(roll = readRDS(tail(cached, 1)), snapshot = tail(cached, 1)))
+  }
+  key_id <- Sys.getenv("SOCRATA_KEY_ID")
+  key_secret <- Sys.getenv("SOCRATA_KEY_SECRET")
+  stopifnot("Set SOCRATA_KEY_ID and SOCRATA_KEY_SECRET" = nzchar(key_id) && nzchar(key_secret))
+
+  page_size <- 50000L
+  offset <- 0L
+  pages <- list()
+  repeat {
+    query <- sprintf(
+      "SELECT house_number, street_name, zoning, neighbourhood, year_built, latitude, longitude WHERE zoning = 'RS' ORDER BY :id LIMIT %d OFFSET %d",
+      page_size, offset
+    )
+    resp <- httr2::request("https://data.edmonton.ca/api/v3/views/dkk9-cj3x/query.json") |>
+      httr2::req_auth_basic(key_id, key_secret) |>
+      httr2::req_url_query(query = query) |>
+      httr2::req_timeout(120) |>
+      httr2::req_retry(max_tries = 3, backoff = \(i) 5) |>
+      httr2::req_perform()
+    page <- jsonlite::fromJSON(httr2::resp_body_string(resp))
+    pages <- c(pages, list(as_tibble(page)))
+    if (nrow(page) < page_size) break
+    offset <- offset + page_size
+  }
+  roll <- bind_rows(pages) |>
+    select(house_number, street_name, zoning, neighbourhood, year_built, latitude, longitude) |>
+    mutate(across(c(year_built, latitude, longitude), as.numeric))
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+  file <- file.path(cache_dir, sprintf("edmonton_property_information_rs_%s.rds", Sys.Date()))
+  saveRDS(roll, file)
+  list(roll = roll, snapshot = file)
+}
+
+property <- get_property_roll(PROPERTY_CACHE)
+PROPERTY_SNAPSHOT <- str_extract(basename(property$snapshot), "[0-9]{4}-[0-9]{2}-[0-9]{2}")
+message("property roll: ", nrow(property$roll), " RS rows, snapshot ", PROPERTY_SNAPSHOT)
+stopifnot(
+  "property roll looks too small" = nrow(property$roll) > 100000,
+  all(c("house_number", "street_name", "neighbourhood", "year_built", "latitude", "longitude") %in% names(property$roll))
+)
+roll <- property$roll |>
+  filter(!is.na(house_number)) |>
   mutate(
-    house = norm_name(house_numb),
-    street = norm_name(street_nam),
-    neighbourhood = fix_name(neighbou_2)
+    house = norm_name(house_number),
+    street = norm_name(street_name),
+    neighbourhood = fix_name(neighbourhood)
   ) |>
   distinct(house, street, .keep_all = TRUE)
 
@@ -401,7 +441,7 @@ permits_json <- list(
   meta = list(
     built = format(Sys.Date()),
     as_of = format(AS_OF),
-    property_snapshot = "2026-01-13",
+    property_snapshot = PROPERTY_SNAPSHOT,
     types = TYPES,
     n_months = N_MONTHS,
     n_total = nrow(pts),
