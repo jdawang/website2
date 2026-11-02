@@ -15,9 +15,9 @@ suppressMessages({
 })
 
 # ---- config ------------------------------------------------------------------
-AS_OF <- as.Date("2026-10-24")
+AS_OF <- as.Date("2026-11-01")
 START_YEAR <- 2024
-N_MONTHS <- (year(AS_OF) - START_YEAR) * 12 + month(AS_OF) # 34
+N_MONTHS <- (year(AS_OF) - START_YEAR) * 12 + month(AS_OF) # 35
 TYPES <- c("Backyard House", "Duplex to Fourplex", "Fiveplex to Eightplex")
 DATA <- "../../../data"
 OUT <- ".."
